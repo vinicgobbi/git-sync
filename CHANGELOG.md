@@ -1,3 +1,9 @@
+## v1.2.0 (2026-10-23)
+
+### Feat
+
+- **tui**: menu lateral e painel no estilo do deploy-tools
+
 ## v1.1.0 (2026-10-23)
 
 ### Feat
