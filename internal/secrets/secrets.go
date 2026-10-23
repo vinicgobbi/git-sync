@@ -1,7 +1,7 @@
 // Package secrets guarda tokens no keyring do sistema operacional.
 //
 // Cada instância tem duas chaves:
-//   - "<nome>"        token de API usado pelo git-sync
+//   - "<nome>"        token de API (só quando a instância não usa tea/gh)
 //   - "<nome>/mirror" token opcional gravado nos push mirrors que apontam para esta
 //     instância (se ausente, usa o token de API)
 package secrets
@@ -46,15 +46,6 @@ func (Keyring) Delete(key string) error {
 
 // APIToken retorna o token de API da instância.
 func APIToken(s Store, instance string) (string, error) { return s.Get(instance) }
-
-// MirrorToken retorna o token dedicado a mirrors, caindo para o token de API.
-func MirrorToken(s Store, instance string) (string, error) {
-	v, err := s.Get(MirrorKey(instance))
-	if errors.Is(err, ErrNotFound) {
-		return s.Get(instance)
-	}
-	return v, err
-}
 
 // Memory é um Store em memória, útil para testes.
 type Memory map[string]string

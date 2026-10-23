@@ -142,6 +142,25 @@ func (c *Client) DeleteRepo(ctx context.Context, owner, name string) error {
 	return c.api.Do(ctx, http.MethodDelete, repoPath(owner, name), nil, nil)
 }
 
+func (c *Client) ListOrgs(ctx context.Context) ([]string, error) {
+	var out []string
+	for page := 1; ; page++ {
+		var batch []struct {
+			Username string `json:"username"`
+		}
+		path := fmt.Sprintf("/user/orgs?page=%d&limit=%d", page, pageSize)
+		if err := c.api.Do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		for _, o := range batch {
+			out = append(out, o.Username)
+		}
+		if len(batch) < pageSize {
+			return out, nil
+		}
+	}
+}
+
 func (c *Client) MirrorsEnabled(ctx context.Context) (bool, error) {
 	var s struct {
 		MirrorsDisabled bool `json:"mirrors_disabled"`

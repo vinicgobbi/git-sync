@@ -68,6 +68,7 @@ func (f *fakeForge) DeleteRepo(_ context.Context, o, n string) error {
 	f.deleted = append(f.deleted, o+"/"+n)
 	return nil
 }
+func (f *fakeForge) ListOrgs(context.Context) ([]string, error)   { return nil, nil }
 func (f *fakeForge) MirrorsEnabled(context.Context) (bool, error) { return f.mirrorsOn, nil }
 func (f *fakeForge) ListPushMirrors(_ context.Context, o, n string) ([]forge.PushMirror, error) {
 	f.mu.Lock()

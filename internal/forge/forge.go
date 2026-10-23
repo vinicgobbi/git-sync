@@ -74,6 +74,7 @@ type Forge interface {
 	GetRepo(ctx context.Context, owner, name string) (*Repo, error) // ErrNotFound se não existir
 	CreateRepo(ctx context.Context, opts CreateRepoOpts) (*Repo, error)
 	DeleteRepo(ctx context.Context, owner, name string) error
+	ListOrgs(ctx context.Context) ([]string, error) // organizações do usuário autenticado
 }
 
 // Mirrorer é implementado apenas por Gitea/Forgejo (origens).

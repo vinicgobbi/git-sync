@@ -63,9 +63,13 @@ func cmdInstance(ctx context.Context, e *app.Env, args []string) error {
 	switch args[0] {
 	case "list", "ls":
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
-		fmt.Fprintln(w, "NOME\tTIPO\tURL\tUSUÁRIO\tORIGEM?")
+		fmt.Fprintln(w, "NOME\tTIPO\tURL\tUSUÁRIO\tCREDENCIAL\tORIGEM?")
 		for _, in := range e.Cfg.Instances {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%v\n", in.Name, in.Kind, in.URL, in.User, in.CanBeSource())
+			auth := "keyring"
+			if in.Auth != config.AuthKeyring {
+				auth = "via " + string(in.Auth)
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%v\n", in.Name, in.Kind, in.URL, in.User, auth, in.CanBeSource())
 		}
 		return w.Flush()
 	case "add":
@@ -86,6 +90,7 @@ func instanceAdd(ctx context.Context, e *app.Env, args []string) error {
 	name := fs.String("name", "", "nome da instância (ex.: casa, codeberg, github)")
 	kind := fs.String("kind", "", "gitea|forgejo|github (vazio = detectar)")
 	rawURL := fs.String("url", "", "URL web da instância (ex.: https://git.exemplo.com)")
+	auth := fs.String("auth", "", "de onde vem o token: vazio = pedir e guardar no keyring; tea = login do tea (aceita OAuth); gh = login do gh")
 	mirrorTok := fs.Bool("mirror-token", false, "também pedir um token dedicado para os push mirrors que apontam para cá")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -94,9 +99,16 @@ func instanceAdd(ctx context.Context, e *app.Env, args []string) error {
 		fs.Usage()
 		return errors.New("--name e --url são obrigatórios")
 	}
-	token, err := readSecret(fmt.Sprintf("token de API para %s: ", *name))
-	if err != nil {
-		return err
+	in := config.Instance{Name: *name, Kind: config.Kind(*kind), URL: *rawURL, Auth: config.Auth(*auth)}
+	if !in.Auth.Valid() {
+		return fmt.Errorf("--auth inválido: %q", *auth)
+	}
+	var token string
+	var err error
+	if in.Auth == config.AuthKeyring {
+		if token, err = readSecret(fmt.Sprintf("token de API para %s: ", *name)); err != nil {
+			return err
+		}
 	}
 	var mt string
 	if *mirrorTok {
@@ -104,7 +116,7 @@ func instanceAdd(ctx context.Context, e *app.Env, args []string) error {
 			return err
 		}
 	}
-	in, err := e.AddInstance(ctx, config.Instance{Name: *name, Kind: config.Kind(*kind), URL: *rawURL}, token, mt)
+	in, err = e.AddInstance(ctx, in, token, mt)
 	if err != nil {
 		return err
 	}
@@ -129,10 +141,10 @@ func instanceImport(ctx context.Context, e *app.Env, args []string) error {
 		case it.Err != nil:
 			fmt.Printf("✘ %s (%s): %v\n", it.Name, it.From, it.Err)
 		default:
-			fmt.Printf("✔ %s (%s, via %s) logado como %s\n", it.Name, it.Inst.Kind, it.From, it.Inst.User)
-			if it.From == "gh" {
-				fmt.Println("  dica: o token do gh é OAuth e ficaria gravado nos mirrors. Prefira um fine-grained PAT")
-				fmt.Println("  (Contents + Workflows: write) com: git-sync instance add --name github --url https://github.com --mirror-token")
+			fmt.Printf("✔ %s (%s, credencial via %s) logado como %s\n", it.Name, it.Inst.Kind, it.From, it.Inst.User)
+			if it.Inst.Kind == config.KindGitHub {
+				fmt.Println("  dica: para usar como destino, cadastre um fine-grained PAT (Contents + Workflows: write)")
+				fmt.Println("  como token de mirror: git-sync instance add --name github --url https://github.com --auth gh --mirror-token")
 			}
 		}
 	}

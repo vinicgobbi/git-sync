@@ -74,6 +74,9 @@ func teaCheck(ctx context.Context) Check {
 		names := make([]string, len(logins))
 		for i, l := range logins {
 			names[i] = l.Name + " (" + l.URL + ")"
+			if l.OAuth() {
+				names[i] = l.Name + " (" + l.URL + ", OAuth)"
+			}
 		}
 		c.Detail = "logins: " + strings.Join(names, ", ")
 	}

@@ -135,6 +135,25 @@ func (c *Client) CreateRepo(ctx context.Context, opts forge.CreateRepoOpts) (*fo
 	return &fr, nil
 }
 
+func (c *Client) ListOrgs(ctx context.Context) ([]string, error) {
+	var out []string
+	for page := 1; ; page++ {
+		var batch []struct {
+			Login string `json:"login"`
+		}
+		path := fmt.Sprintf("/user/orgs?per_page=%d&page=%d", pageSize, page)
+		if err := c.api.Do(ctx, http.MethodGet, path, nil, &batch); err != nil {
+			return nil, err
+		}
+		for _, o := range batch {
+			out = append(out, o.Login)
+		}
+		if len(batch) < pageSize {
+			return out, nil
+		}
+	}
+}
+
 func (c *Client) DeleteRepo(ctx context.Context, owner, name string) error {
 	return c.api.Do(ctx, http.MethodDelete, repoPath(owner, name), nil, nil)
 }

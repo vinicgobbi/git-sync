@@ -2,6 +2,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/vinicgobbi/git-sync/internal/config"
@@ -11,9 +12,23 @@ import (
 	"github.com/vinicgobbi/git-sync/internal/secrets"
 )
 
-// Connect cria o cliente da instância usando o token de API do keyring.
+// APIToken resolve o token de API conforme a forma de autenticação da instância.
+// Para tea/gh o token é pedido na hora, então tokens OAuth renovados são respeitados.
+func APIToken(ctx context.Context, in config.Instance, store secrets.Store) (string, error) {
+	switch in.Auth {
+	case config.AuthTea:
+		_, tok, err := secrets.TeaHelperToken(ctx, in.URL)
+		return tok, err
+	case config.AuthGh:
+		host := in.Host()
+		return secrets.GhToken(ctx, host)
+	}
+	return secrets.APIToken(store, in.Name)
+}
+
+// Connect cria o cliente da instância.
 func Connect(in config.Instance, store secrets.Store) (forge.Forge, error) {
-	token, err := secrets.APIToken(store, in.Name)
+	token, err := APIToken(context.Background(), in, store)
 	if err != nil {
 		return nil, fmt.Errorf("instância %q: %w", in.Name, err)
 	}
