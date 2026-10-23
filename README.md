@@ -79,27 +79,97 @@ A configuração fica em `~/.config/git-sync/config.yaml`.
 
 ### Credenciais
 
-Toda a autenticação é feita por **tokens de acesso**, guardados no keyring do sistema (nunca no
-arquivo de configuração). Na interface, o formulário de cada instância mostra onde criar cada token
-e quais permissões dar. Na CLI, os tokens são pedidos sem eco ou lidos de `GIT_SYNC_TOKEN` e
+Toda a autenticação é feita por **tokens**, guardados no keyring do sistema (nunca no arquivo de
+configuração). Cada instância cadastrada tem até dois:
+
+- **Token de acesso**: usado pelo próprio git-sync na API da instância, para listar repositórios e
+  organizações, criar os repositórios de destino e configurar os espelhos nas origens.
+- **Token de mirror**: não é usado pelo git-sync, e sim **gravado em cada espelho**, no servidor de
+  origem, que o usa para enviar os commits ao destino. Como fica guardado em outro servidor, deve poder
+  só enviar commits. Só importa para instâncias que são **destino**.
+
+Na interface, o formulário de cada instância mostra estas mesmas instruções para o campo em foco. Na
+CLI (`git-sync instance add`), os tokens são pedidos sem eco ou lidos de `GIT_SYNC_TOKEN` e
 `GIT_SYNC_MIRROR_TOKEN`.
 
-Cada instância tem dois tokens:
+#### Gitea e Forgejo
 
-- **Token de acesso**: usado pelo git-sync na API, para listar repositórios, criar os destinos e
-  configurar os espelhos.
-- **Token de mirror**: fica gravado em cada espelho, no servidor de origem, que o usa para enviar ao
-  destino. Como sai do seu controle, deve poder só enviar commits. **Obrigatório no GitHub.** No
-  Gitea/Forgejo é opcional: sem ele, os espelhos usam o token de acesso.
+Podem ser **origem** (enviam os espelhos) e **destino** (recebem). Os tokens são criados em
+`<endereço>/user/settings/applications` (Configurações → Aplicações), na seção de gerar um novo token,
+logado com a conta que o git-sync vai usar. Para cada categoria de escopo, escolha o nível indicado e
+deixe as demais em "Sem acesso". Se a versão perguntar o alcance do token, escolha **todos** os
+repositórios (públicos, privados e limitados), não só os públicos. Tokens do Gitea e do Forgejo não
+expiram.
 
-| Instância | Token | Onde criar | Permissões |
-|---|---|---|---|
-| Gitea/Forgejo | acesso | `<endereço>/user/settings/applications` | repository: leitura e escrita; organization: leitura e escrita (leitura basta se não for criar repositórios em organizações); user: leitura |
-| Gitea/Forgejo | mirror | `<endereço>/user/settings/applications` | repository: leitura e escrita |
-| GitHub | acesso | `github.com/settings/personal-access-tokens/new` (fine-grained; resource owner: sua conta ou a organização de destino; All repositories) | Administration: Read and write; Contents: Read-only |
-| GitHub | mirror | idem | Contents: Read and write; Workflows: Read and write (sem esta, pushes que alteram `.github/workflows` falham) |
+**Token de acesso** (obrigatório)
 
-Nas origens, sua conta precisa ser administradora dos repositórios espelhados.
+| Escopo | Nível | Para quê |
+|---|---|---|
+| `repository` | Leitura e escrita | listar repositórios; na origem, criar, sincronizar e remover os espelhos; no destino, criar os repositórios |
+| `organization` | Leitura e escrita | criar repositórios de destino em organizações (**Leitura** basta se a instância for só origem ou se você só criar na sua conta) |
+| `user` | Leitura | identificar a conta do token |
+
+Na **origem**, a conta do token precisa ser **administradora** de cada repositório espelhado: o Gitea e
+o Forgejo só deixam administradores configurar espelhos. Repositórios em que ela não é administradora
+não aparecem para espelhar. O administrador da instância também precisa manter os push mirrors
+habilitados (`[mirror] ENABLED`, `DISABLE_NEW_PUSH`); o git-sync avisa em Instâncias quando estão
+desligados.
+
+**Token de mirror** (opcional, recomendado se a instância for destino)
+
+| Escopo | Nível | Para quê |
+|---|---|---|
+| `repository` | Leitura e escrita | receber os commits enviados pela origem |
+
+Sem ele, os espelhos que enviam para esta instância usam o token de acesso, que pode bem mais do que
+enviar commits (criar repositórios, mexer em organizações). A conta do token precisa ter escrita nos
+repositórios de destino: se forem de uma organização, ela precisa ser membro com escrita.
+
+#### GitHub
+
+Só pode ser **destino**: o GitHub não tem push mirrors. Use tokens **classic**, criados em
+`github.com/settings/tokens/new` (Settings → Developer settings → Personal access tokens → Tokens
+(classic)); no GitHub Enterprise, `<endereço>/settings/tokens/new`. Os dois são **obrigatórios**.
+
+Por que classic: com tokens fine-grained, a API não lista suas organizações (não dá para escolhê-las
+como destino) e um token restrito a alguns repositórios não alcança os que o git-sync cria depois. Eles
+são aceitos, mas com aviso em Instâncias.
+
+**Token de acesso** (obrigatório)
+
+| Escopo | Para quê |
+|---|---|
+| `repo` | criar os repositórios de destino (privados também) e ver se já existem e se estão vazios |
+| `read:org` (dentro de `admin:org`; `write:org` ou `admin:org` também servem) | listar suas organizações, para escolher onde criar |
+| `delete_repo` (recomendado) | desfazer o repositório recém-criado quando a configuração do espelho falha; sem ele, o repositório vazio fica no GitHub |
+
+**Token de mirror** (obrigatório)
+
+| Escopo | Para quê |
+|---|---|
+| `repo` | receber os commits enviados pela origem |
+| `workflow` | receber commits que alteram `.github/workflows`; sem ele, esses envios são recusados |
+
+Para os dois:
+
+- **Expiration**: escolha "No expiration" ou a validade mais longa que sua conta ou organização
+  permitir. Quando um token vencer, veja [Trocar um token](#trocar-um-token).
+- **Organizações com SSO (SAML)**: depois de criar o token, autorize-o em cada organização de destino
+  (na lista de tokens, Configure SSO → Authorize). Sem isso, o GitHub responde 403 para elas.
+- **Organizações que restringem tokens classic** recusam o token mesmo com os escopos certos; nesse
+  caso, fale com um administrador da organização.
+- O git-sync **confere os escopos** ao salvar a instância e recusa um token incompleto, dizendo o que
+  falta. Em Instâncias, avisa quando falta `delete_repo` ou quando o token de mirror ficou sem
+  `workflow`.
+
+#### Resumo
+
+| Instância | Token | Obrigatório? | Onde criar | Escopos |
+|---|---|---|---|---|
+| Gitea/Forgejo | acesso | sim | `<endereço>/user/settings/applications` | `repository` e `organization`: leitura e escrita; `user`: leitura |
+| Gitea/Forgejo | mirror | não (recomendado se for destino) | `<endereço>/user/settings/applications` | `repository`: leitura e escrita |
+| GitHub | acesso | sim | `github.com/settings/tokens/new` (classic) | `repo`, `read:org`; `delete_repo` recomendado |
+| GitHub | mirror | sim | `github.com/settings/tokens/new` (classic) | `repo`, `workflow` |
 
 ### Trocar um token
 
