@@ -17,6 +17,9 @@ type APIError struct {
 	Method string
 	Path   string
 	Body   string
+	// Accepted é o que a operação aceita, quando a forge diz (o GitHub manda
+	// os escopos ou permissões de token aceitos); "" se não diz.
+	Accepted string
 }
 
 func (e *APIError) Error() string {

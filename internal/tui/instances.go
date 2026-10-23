@@ -141,6 +141,8 @@ func (v *instancesView) status(in config.Instance) (dot, text string) {
 		return sErr.Render("●"), sErr.Render(humanize(c.st.Err).msg)
 	case c.st.MirrorsDisabled:
 		return sWarn.Render("●"), sWarn.Render("espelhamento desativado pelo administrador")
+	case len(c.st.Warnings) > 0:
+		return sWarn.Render("●"), "conectado como " + sBold.Render(c.st.User) + sWarn.Render(" · "+plural(len(c.st.Warnings), "aviso", "avisos"))
 	}
 	return sOK.Render("●"), "conectado como " + sBold.Render(c.st.User)
 }
@@ -212,6 +214,9 @@ func (v *instancesView) detail(in config.Instance, w int) string {
 	}
 	if warn != "" {
 		lines = append(lines, "", sWarn.Render("⚠ ")+wrap(warn, w-6))
+	}
+	for _, wn := range st.Warnings {
+		lines = append(lines, "", sWarn.Render("⚠ ")+wrap(wn, w-6))
 	}
 	lines = append(lines, "", sMuted.Render(wrap("Trocou um token? Os espelhos que enviam para cá guardam o antigo: "+
 		"c renova a credencial em todos eles.", w-4)))

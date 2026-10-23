@@ -18,30 +18,31 @@ func tokenGuide(kind config.Kind, base string, mirror bool) (title string, lines
 	switch {
 	case kind == config.KindGitHub && !mirror:
 		return "Token de acesso do GitHub", []string{
-			"Usado pelo git-sync para listar contas e criar os repositórios de destino.",
+			"Usado pelo git-sync para listar suas organizações e criar os repositórios de destino.",
 			"",
-			"Crie em " + base + "/settings/personal-access-tokens/new (fine-grained):",
-			"• Resource owner: sua conta, ou a organização onde os repositórios serão criados",
-			"• Repository access: All repositories",
-			"• Repository permissions:",
-			"    Administration: Read and write (criar repositórios)",
-			"    Contents: Read-only (ver se o destino já tem conteúdo)",
-			"    Metadata: Read-only (automática)",
-			"• Expiration: a mais longa que sua conta ou organização permitir",
+			"Crie em " + base + "/settings/tokens/new (Personal access tokens → Tokens (classic)):",
+			"• Expiration: No expiration, ou a mais longa que sua conta permitir",
+			"• Escopos:",
+			"    repo (criar e ler repositórios)",
+			"    read:org, dentro de admin:org (listar as organizações onde criar)",
+			"    delete_repo (recomendado: desfaz o repositório criado se o espelho falhar)",
+			"• Organizações com SSO: depois de criar, use Configure SSO → Authorize em cada uma",
+			"",
+			"O git-sync confere os escopos ao salvar.",
 		}
 	case kind == config.KindGitHub:
 		return "Token de mirror do GitHub (obrigatório)", []string{
 			"Fica gravado nos espelhos: é com ele que o servidor de origem envia para o GitHub.",
 			"Por isso é um token separado, só com o necessário para enviar.",
 			"",
-			"Crie em " + base + "/settings/personal-access-tokens/new (fine-grained):",
-			"• Resource owner e Repository access: os mesmos do token de acesso",
-			"• Repository permissions:",
-			"    Contents: Read and write",
-			"    Workflows: Read and write (sem ela, pushes que mudam .github/workflows falham)",
-			"• Expiration: a mais longa permitida",
+			"Crie em " + base + "/settings/tokens/new (Tokens (classic)):",
+			"• Expiration: No expiration, ou a mais longa permitida",
+			"• Escopos:",
+			"    repo (enviar commits)",
+			"    workflow (sem ele, pushes que mudam .github/workflows falham)",
+			"• Organizações com SSO: autorize o token nelas também",
 			"",
-			`Quando vencer, gere outro, cole aqui e use "Renovar credencial" em Instâncias.`,
+			`Quando vencer, gere outro, cole aqui e use "renovar credencial" (c) em Instâncias.`,
 		}
 	case !mirror:
 		name := kindName(kind)
@@ -71,7 +72,7 @@ func tokenGuide(kind config.Kind, base string, mirror bool) (title string, lines
 // tokenOverview resume os tokens que uma instância do tipo precisa.
 func tokenOverview(kind config.Kind) string {
 	if kind == config.KindGitHub {
-		return "O GitHub precisa de dois tokens: um de acesso, para o git-sync criar os repositórios, " +
+		return "O GitHub precisa de dois tokens classic: um de acesso, para o git-sync criar os repositórios, " +
 			"e um de mirror, que fica gravado nos espelhos. Vá até cada campo para ver como criá-los."
 	}
 	return "Gitea e Forgejo precisam de um token de acesso. O token de mirror é opcional e recomendado " +

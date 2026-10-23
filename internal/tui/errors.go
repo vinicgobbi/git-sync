@@ -26,11 +26,15 @@ func humanize(err error) friendly {
 	var api *forge.APIError
 	var uerr *url.Error
 	var nerr net.Error
+	var scope *app.ScopeError
 	switch {
+	case errors.As(err, &scope):
+		return friendly{"O token " + scope.Token + " do GitHub não tem " + strings.Join(scope.Missing, ", "),
+			"Gere outro token classic com os escopos " + strings.Join(scope.Need, ", ") + " e edite a instância."}
 	case errors.Is(err, app.ErrLegacyAuth):
 		return friendly{"Sem token de acesso", "Esta instância usava o login do tea ou do gh, que não é mais suportado. Edite-a e informe um token."}
 	case errors.Is(err, app.ErrNoMirrorToken):
-		return friendly{"Falta o token de mirror", "Destinos GitHub precisam de um token de mirror (Contents e Workflows: read and write). Edite a instância e informe-o."}
+		return friendly{"Falta o token de mirror", "Destinos GitHub precisam de um token de mirror classic (escopos repo e workflow). Edite a instância e informe-o."}
 	case errors.Is(err, secrets.ErrNotFound):
 		return friendly{"Token não encontrado no keyring", "Edite a instância em Instâncias e informe o token."}
 	case errors.Is(err, context.DeadlineExceeded):
@@ -58,6 +62,8 @@ func humanizeAPI(e *forge.APIError) friendly {
 	switch {
 	case e.Status == 401:
 		return friendly{"Token inválido ou expirado", "Gere um novo token e atualize a instância em Instâncias."}
+	case e.Status == 403 && e.Accepted != "" && !strings.Contains(body, "rate limit"):
+		return friendly{"O token não tem permissão para esta operação", "O GitHub aceita aqui: " + e.Accepted + ". Edite a instância com um token que tenha isso."}
 	case e.Status == 403 && strings.Contains(body, "rate limit"):
 		return friendly{"Limite de requisições da API atingido", "Aguarde alguns minutos e tente de novo."}
 	case e.Status == 403:

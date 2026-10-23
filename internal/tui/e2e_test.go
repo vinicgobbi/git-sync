@@ -366,10 +366,10 @@ func TestInstanceFormGuide(t *testing.T) {
 	d.key("tab", "ctrl+u")
 	d.typeText("https://github.com")
 	d.key("tab", "tab")
-	d.mustSee("Token de acesso do GitHub", "Administration: Read and write")
+	d.mustSee("Token de acesso do GitHub", "/settings/tokens/new", "read:org", "delete_repo")
 	d.typeText("ghp_api")
 	d.key("tab")
-	d.mustSee("Token de mirror do GitHub (obrigatório)", "Workflows: Read and write", "obrigatório no GitHub")
+	d.mustSee("Token de mirror do GitHub (obrigatório)", "workflow (sem ele", "obrigatório no GitHub")
 	d.key("ctrl+s")
 	d.mustSee("o GitHub precisa de um token de mirror")
 	if len(env.Cfg.Instances) != 0 {

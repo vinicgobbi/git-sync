@@ -31,7 +31,7 @@ func GuessKind(ctx context.Context, rawURL string) config.Kind {
 }
 
 // ErrNoMirrorToken: um destino GitHub precisa de token de mirror dedicado.
-var ErrNoMirrorToken = errors.New("destinos GitHub precisam de um token de mirror dedicado (Contents e Workflows: read and write); edite a instância e informe-o")
+var ErrNoMirrorToken = errors.New("destinos GitHub precisam de um token de mirror dedicado (classic, com repo e workflow); edite a instância e informe-o")
 
 // AddInstance grava os tokens, valida o login (preenchendo User) e salva a config.
 // Ao editar, token ou mirrorToken vazios mantêm os já salvos. No GitHub o
@@ -50,9 +50,20 @@ func (e *Env) AddInstance(ctx context.Context, in config.Instance, token, mirror
 	if token == "" {
 		return in, errors.New("informe o token de acesso")
 	}
-	if in.Kind == config.KindGitHub && mirrorToken == "" {
-		if _, err := e.Store.Get(secrets.MirrorKey(in.Name)); err != nil {
-			return in, ErrNoMirrorToken
+	if in.Kind == config.KindGitHub {
+		if mirrorToken == "" {
+			if _, err := e.Store.Get(secrets.MirrorKey(in.Name)); err != nil {
+				return in, ErrNoMirrorToken
+			}
+		}
+		// confere os escopos antes de salvar qualquer coisa
+		if err := checkGitHubToken(ctx, in.URL, token, "de acesso", GitHubAPIScopes); err != nil {
+			return in, err
+		}
+		if mirrorToken != "" {
+			if err := checkGitHubToken(ctx, in.URL, mirrorToken, "de mirror", GitHubMirrorScopes); err != nil {
+				return in, err
+			}
 		}
 	}
 	in.LegacyAuth = ""
@@ -90,6 +101,7 @@ func (e *Env) RemoveInstance(name string) error {
 type InstanceStatus struct {
 	User            string
 	MirrorToken     bool // tem token dedicado para mirrors
+	Warnings        []string
 	MirrorsDisabled bool
 	Err             error
 }
@@ -105,8 +117,14 @@ func (e *Env) CheckInstance(ctx context.Context, in config.Instance) InstanceSta
 	if st.User, st.Err = f.Whoami(ctx); st.Err != nil {
 		return st
 	}
-	_, err = e.Store.Get(secrets.MirrorKey(in.Name))
+	mt, err := e.Store.Get(secrets.MirrorKey(in.Name))
 	st.MirrorToken = err == nil
+	if in.Kind == config.KindGitHub {
+		token, _ := APIToken(in, e.Store)
+		if st.Warnings, st.Err = githubWarnings(ctx, in.URL, token, mt); st.Err != nil {
+			return st
+		}
+	}
 	if src, ok := f.(forge.Mirrorer); ok && in.CanBeSource() {
 		on, err := src.MirrorsEnabled(ctx)
 		st.Err, st.MirrorsDisabled = err, err == nil && !on

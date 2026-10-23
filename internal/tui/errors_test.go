@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/vinicgobbi/git-sync/internal/app"
 	"github.com/vinicgobbi/git-sync/internal/forge"
 	"github.com/vinicgobbi/git-sync/internal/secrets"
 )
@@ -23,11 +24,17 @@ func TestHumanize(t *testing.T) {
 		{fmt.Errorf("x: %w", secrets.ErrNotFound), "Token não encontrado"},
 		{&url.Error{Op: "Get", URL: "https://git.lan/api/v1/user", Err: errors.New("dial tcp: connection refused")}, "conectar a git.lan"},
 		{&forge.APIError{Status: 418, Body: `{"message":"sou um bule"}`}, "HTTP 418: sou um bule"},
+		{&app.ScopeError{Token: "de mirror", Missing: []string{"workflow"}, Need: []string{"repo", "workflow"}}, "de mirror do GitHub não tem workflow"},
 	}
 	for _, c := range cases {
 		if got := humanize(c.err).msg; !strings.Contains(got, c.want) {
 			t.Errorf("humanize(%v) = %q, want contendo %q", c.err, got, c.want)
 		}
+	}
+	// o GitHub diz o que aceitaria: vai para a dica
+	h := humanize(&forge.APIError{Status: 403, Accepted: "escopos repo"})
+	if !strings.Contains(h.hint, "escopos repo") {
+		t.Errorf("dica do 403 com X-Accepted-OAuth-Scopes: %q", h.hint)
 	}
 }
 

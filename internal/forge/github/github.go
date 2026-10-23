@@ -78,6 +78,25 @@ func (c *Client) Whoami(ctx context.Context) (string, error) {
 	return c.user, c.userErr
 }
 
+// Scopes devolve os escopos do token, lidos do cabeçalho X-OAuth-Scopes.
+// classic=false quando o token não é classic (fine-grained não tem escopos).
+func (c *Client) Scopes(ctx context.Context) (scopes []string, classic bool, err error) {
+	h, err := c.api.DoHeader(ctx, http.MethodGet, "/user", nil, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	raw, ok := h["X-Oauth-Scopes"]
+	if !ok {
+		return nil, false, nil
+	}
+	for _, s := range strings.Split(strings.Join(raw, ","), ",") {
+		if s = strings.TrimSpace(s); s != "" {
+			scopes = append(scopes, s)
+		}
+	}
+	return scopes, true, nil
+}
+
 func (c *Client) ListRepos(ctx context.Context) ([]forge.Repo, error) {
 	var out []forge.Repo
 	for page := 1; ; page++ {

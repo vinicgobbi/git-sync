@@ -114,7 +114,11 @@ README e na tela "Adicionar instância" da interface.
 	if in.Kind == "" {
 		in.Kind = app.GuessKind(ctx, in.URL)
 	}
-	token, err := readSecret(fmt.Sprintf("token de acesso para %s: ", *name), "GIT_SYNC_TOKEN")
+	prompt := fmt.Sprintf("token de acesso para %s: ", *name)
+	if in.Kind == config.KindGitHub {
+		prompt = fmt.Sprintf("token de acesso para %s (classic, com repo e read:org; delete_repo recomendado): ", *name)
+	}
+	token, err := readSecret(prompt, "GIT_SYNC_TOKEN")
 	if err != nil {
 		return err
 	}
@@ -122,7 +126,7 @@ README e na tela "Adicionar instância" da interface.
 	if *mirrorTok || in.Kind == config.KindGitHub {
 		perms := "repository: leitura e escrita"
 		if in.Kind == config.KindGitHub {
-			perms = "Contents e Workflows: read and write"
+			perms = "classic, com repo e workflow"
 		}
 		if mt, err = readSecret("token de mirror ("+perms+"): ", "GIT_SYNC_MIRROR_TOKEN"); err != nil {
 			return err
