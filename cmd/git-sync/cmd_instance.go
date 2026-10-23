@@ -6,7 +6,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net/url"
 	"os"
 	"strings"
 	"text/tabwriter"
@@ -16,10 +15,9 @@ import (
 	"github.com/vinicgobbi/git-sync/internal/app"
 	"github.com/vinicgobbi/git-sync/internal/config"
 	"github.com/vinicgobbi/git-sync/internal/deps"
-	"github.com/vinicgobbi/git-sync/internal/secrets"
 )
 
-func cmdDoctor(ctx context.Context, e *env) error {
+func cmdDoctor(ctx context.Context, e *app.Env) error {
 	ok := true
 	for _, c := range deps.Run(ctx) {
 		mark := "✔"
@@ -34,9 +32,9 @@ func cmdDoctor(ctx context.Context, e *env) error {
 			fmt.Printf("       %s\n", c.Detail)
 		}
 	}
-	fmt.Printf("\nconfig: %s (%d instâncias)\n", e.cfgPath, len(e.cfg.Instances))
-	for _, in := range e.cfg.Instances {
-		fmt.Printf("  %s: %s\n", in.Name, checkInstance(ctx, e, in))
+	fmt.Printf("\nconfig: %s (%d instâncias)\n", e.CfgPath, len(e.Cfg.Instances))
+	for _, in := range e.Cfg.Instances {
+		fmt.Printf("  %s: %s\n", in.Name, describeStatus(e.CheckInstance(ctx, in)))
 	}
 	if !ok {
 		return errors.New("dependências obrigatórias ausentes")
@@ -44,31 +42,21 @@ func cmdDoctor(ctx context.Context, e *env) error {
 	return nil
 }
 
-func checkInstance(ctx context.Context, e *env, in config.Instance) string {
-	f, err := app.Connect(in, e.store)
-	if err != nil {
-		return "✘ " + err.Error()
+func describeStatus(st app.InstanceStatus) string {
+	if st.Err != nil {
+		return "✘ " + st.Err.Error()
 	}
-	user, err := f.Whoami(ctx)
-	if err != nil {
-		return "✘ " + err.Error()
-	}
-	msg := "✔ logado como " + user
-	if _, err := e.store.Get(secrets.MirrorKey(in.Name)); err == nil {
+	msg := "✔ logado como " + st.User
+	if st.MirrorToken {
 		msg += ", token de mirror dedicado"
 	}
-	if in.CanBeSource() {
-		src, _ := app.ConnectSource(in, e.store)
-		if on, err := src.MirrorsEnabled(ctx); err != nil {
-			msg += ", ✘ não foi possível checar mirrors: " + err.Error()
-		} else if !on {
-			msg += ", ✘ espelhamento DESABILITADO na instância"
-		}
+	if st.MirrorsDisabled {
+		msg += ", ✘ espelhamento DESABILITADO na instância"
 	}
 	return msg
 }
 
-func cmdInstance(ctx context.Context, e *env, args []string) error {
+func cmdInstance(ctx context.Context, e *app.Env, args []string) error {
 	if len(args) == 0 {
 		return errors.New("uso: git-sync instance list|add|rm|import")
 	}
@@ -76,7 +64,7 @@ func cmdInstance(ctx context.Context, e *env, args []string) error {
 	case "list", "ls":
 		w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(w, "NOME\tTIPO\tURL\tUSUÁRIO\tORIGEM?")
-		for _, in := range e.cfg.Instances {
+		for _, in := range e.Cfg.Instances {
 			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%v\n", in.Name, in.Kind, in.URL, in.User, in.CanBeSource())
 		}
 		return w.Flush()
@@ -86,19 +74,14 @@ func cmdInstance(ctx context.Context, e *env, args []string) error {
 		if len(args) != 2 {
 			return errors.New("uso: git-sync instance rm NOME")
 		}
-		if !e.cfg.Remove(args[1]) {
-			return fmt.Errorf("instância %q não existe", args[1])
-		}
-		_ = e.store.Delete(args[1])
-		_ = e.store.Delete(secrets.MirrorKey(args[1]))
-		return e.save()
+		return e.RemoveInstance(args[1])
 	case "import":
 		return instanceImport(ctx, e, args[1:])
 	}
 	return fmt.Errorf("subcomando desconhecido: %q", args[0])
 }
 
-func instanceAdd(ctx context.Context, e *env, args []string) error {
+func instanceAdd(ctx context.Context, e *app.Env, args []string) error {
 	fs := flag.NewFlagSet("instance add", flag.ContinueOnError)
 	name := fs.String("name", "", "nome da instância (ex.: casa, codeberg, github)")
 	kind := fs.String("kind", "", "gitea|forgejo|github (vazio = detectar)")
@@ -111,99 +94,49 @@ func instanceAdd(ctx context.Context, e *env, args []string) error {
 		fs.Usage()
 		return errors.New("--name e --url são obrigatórios")
 	}
-	in := config.Instance{Name: *name, Kind: config.Kind(*kind), URL: strings.TrimSuffix(*rawURL, "/")}
-	if in.Kind == "" {
-		in.Kind = guessKind(ctx, in.URL)
-		fmt.Printf("tipo detectado: %s\n", in.Kind)
-	}
-
-	token, err := readSecret(fmt.Sprintf("token de API para %s: ", in.Name))
+	token, err := readSecret(fmt.Sprintf("token de API para %s: ", *name))
 	if err != nil {
 		return err
 	}
-	if err := e.store.Set(in.Name, token); err != nil {
-		return fmt.Errorf("salvando no keyring: %w", err)
-	}
+	var mt string
 	if *mirrorTok {
-		mt, err := readSecret("token dedicado para mirrors: ")
-		if err != nil {
-			return err
-		}
-		if err := e.store.Set(secrets.MirrorKey(in.Name), mt); err != nil {
+		if mt, err = readSecret("token dedicado para mirrors: "); err != nil {
 			return err
 		}
 	}
-	return finishInstance(ctx, e, in)
-}
-
-// finishInstance valida o token (descobrindo o usuário) e salva a config.
-func finishInstance(ctx context.Context, e *env, in config.Instance) error {
-	f, err := app.Connect(in, e.store)
+	in, err := e.AddInstance(ctx, config.Instance{Name: *name, Kind: config.Kind(*kind), URL: *rawURL}, token, mt)
 	if err != nil {
 		return err
 	}
-	user, err := f.Whoami(ctx)
-	if err != nil {
-		return fmt.Errorf("%s: token inválido? %w", in.Name, err)
-	}
-	in.User = user
-	e.cfg.Upsert(in)
-	if err := e.save(); err != nil {
-		return err
-	}
-	fmt.Printf("✔ %s (%s) salvo, logado como %s\n", in.Name, in.Kind, user)
+	fmt.Printf("✔ %s (%s) salvo, logado como %s\n", in.Name, in.Kind, in.User)
 	return nil
 }
 
-func instanceImport(ctx context.Context, e *env, args []string) error {
+func instanceImport(ctx context.Context, e *app.Env, args []string) error {
 	fs := flag.NewFlagSet("instance import", flag.ContinueOnError)
 	overwrite := fs.Bool("overwrite", false, "sobrescrever instâncias com o mesmo nome")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	exists := func(name string) bool { _, ok := e.cfg.Find(name); return ok && !*overwrite }
-
-	logins, err := secrets.TeaLogins()
+	items, err := e.Import(ctx, *overwrite)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "aviso: lendo config do tea:", err)
+		return err
 	}
-	for _, l := range logins {
-		if exists(l.Name) {
-			fmt.Printf("– %s já existe, pulando (use --overwrite)\n", l.Name)
-			continue
-		}
-		in := config.Instance{Name: l.Name, URL: strings.TrimSuffix(l.URL, "/")}
-		in.Kind = guessKind(ctx, in.URL)
-		if err := e.store.Set(in.Name, l.Token); err != nil {
-			return err
-		}
-		if err := finishInstance(ctx, e, in); err != nil {
-			fmt.Fprintln(os.Stderr, "✘", err)
-		}
-	}
-
-	if !exists("github") {
-		if tok, err := secrets.GhToken(ctx, "github.com"); err == nil && tok != "" {
-			if err := e.store.Set("github", tok); err != nil {
-				return err
-			}
-			in := config.Instance{Name: "github", Kind: config.KindGitHub, URL: "https://github.com"}
-			if err := finishInstance(ctx, e, in); err != nil {
-				fmt.Fprintln(os.Stderr, "✘", err)
-			} else {
+	for _, it := range items {
+		switch {
+		case it.Skipped:
+			fmt.Printf("– %s já existe, pulando (use --overwrite)\n", it.Name)
+		case it.Err != nil:
+			fmt.Printf("✘ %s (%s): %v\n", it.Name, it.From, it.Err)
+		default:
+			fmt.Printf("✔ %s (%s, via %s) logado como %s\n", it.Name, it.Inst.Kind, it.From, it.Inst.User)
+			if it.From == "gh" {
 				fmt.Println("  dica: o token do gh é OAuth e ficaria gravado nos mirrors. Prefira um fine-grained PAT")
 				fmt.Println("  (Contents + Workflows: write) com: git-sync instance add --name github --url https://github.com --mirror-token")
 			}
 		}
 	}
 	return nil
-}
-
-func guessKind(ctx context.Context, rawURL string) config.Kind {
-	if u, err := url.Parse(rawURL); err == nil && strings.EqualFold(u.Host, "github.com") {
-		return config.KindGitHub
-	}
-	return app.DetectKind(ctx, rawURL)
 }
 
 // readSecret lê da variável GIT_SYNC_TOKEN, do terminal (sem eco) ou de stdin.

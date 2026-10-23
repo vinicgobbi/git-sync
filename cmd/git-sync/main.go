@@ -8,14 +8,18 @@ import (
 	"os"
 	"os/signal"
 
+	"github.com/vinicgobbi/git-sync/internal/app"
 	"github.com/vinicgobbi/git-sync/internal/config"
 	"github.com/vinicgobbi/git-sync/internal/secrets"
+	"github.com/vinicgobbi/git-sync/internal/tui"
 )
 
 const usage = `git-sync — gerencia push mirrors Gitea/Forgejo → GitHub/Gitea/Forgejo
 
 Uso:
-  git-sync [--config ARQ] <comando> [flags]
+  git-sync [--config ARQ] [comando] [flags]
+
+Sem comando, abre a interface (TUI).
 
 Comandos:
   doctor                       verifica git, gh, tea e logins
@@ -28,14 +32,6 @@ Comandos:
 
 Use "git-sync <comando> -h" para ver as flags.
 `
-
-type env struct {
-	cfgPath string
-	cfg     *config.Config
-	store   secrets.Store
-}
-
-func (e *env) save() error { return e.cfg.Save(e.cfgPath) }
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -59,19 +55,19 @@ func run(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	if fs.NArg() == 0 {
-		fs.Usage()
-		return flag.ErrHelp
-	}
-
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		return err
 	}
-	e := &env{cfgPath: *cfgPath, cfg: cfg, store: secrets.Keyring{}}
+	e := &app.Env{CfgPath: *cfgPath, Cfg: cfg, Store: secrets.Keyring{}}
 
+	if fs.NArg() == 0 {
+		return tui.Run(ctx, e)
+	}
 	cmd, rest := fs.Arg(0), fs.Args()[1:]
 	switch cmd {
+	case "tui":
+		return tui.Run(ctx, e)
 	case "doctor":
 		return cmdDoctor(ctx, e)
 	case "instance":

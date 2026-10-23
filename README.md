@@ -5,8 +5,6 @@ Gerencia **push mirrors** de repositórios Gitea/Forgejo para GitHub, Gitea ou F
 A origem é sempre um Gitea ou Forgejo, que espelham nativamente ("Opções de Espelhamento").
 O git-sync cria o repositório vazio no destino e configura o push mirror na origem apontando para ele.
 
-> Status: núcleo + CLI funcionando. A interface TUI está em desenvolvimento.
-
 ## Instalação
 
 ```sh
@@ -14,6 +12,17 @@ go install github.com/vinicgobbi/git-sync/cmd/git-sync@latest
 ```
 
 ## Uso
+
+Sem argumentos, `git-sync` abre a interface (TUI):
+
+- **Painel**: lista os push mirrors de todas as origens (inclusive os criados fora da ferramenta),
+  com último sync e erros; `s` sincroniza agora, `x` remove o mirror.
+- **Doctor** (`d`): verifica git/gh/tea e importa logins do tea e do gh (`m`).
+- **Instâncias** (`i`): cadastra, edita ou remove instâncias e tokens.
+- **Novo espelho** (`n`): escolhe repositórios (com filtro e seleção múltipla), destinos e opções,
+  revisa o plano e executa. Rodar de novo não duplica nada.
+
+A mesma funcionalidade existe como CLI:
 
 ```sh
 git-sync doctor                 # verifica git, gh, tea, logins e tokens
@@ -31,3 +40,14 @@ Os tokens ficam no keyring do sistema e a configuração em `~/.config/git-sync/
 O token do destino fica gravado no servidor de origem. Prefira um token dedicado
 (`--mirror-token`). No GitHub, use um fine-grained PAT com **Contents: write** e
 **Workflows: write** (sem este, pushes que alteram `.github/workflows` falham).
+
+## Desenvolvimento
+
+```sh
+go test ./...
+```
+
+O teste `TestE2E` (em `internal/tui`) dirige a TUI contra um Gitea e um Forgejo reais.
+Ele roda só quando `GITSYNC_E2E_GITEA_URL`, `GITSYNC_E2E_GITEA_TOKEN`, `GITSYNC_E2E_FORGEJO_URL`
+e `GITSYNC_E2E_FORGEJO_TOKEN` estão definidas. A origem precisa ter os repos `vini/app` e `vini/lib`,
+e a origem precisa alcançar o destino (com `[migrations] ALLOW_LOCALNETWORKS = true` se for rede local).

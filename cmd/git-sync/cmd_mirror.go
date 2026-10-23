@@ -14,7 +14,6 @@ import (
 	"github.com/vinicgobbi/git-sync/internal/app"
 	"github.com/vinicgobbi/git-sync/internal/forge"
 	"github.com/vinicgobbi/git-sync/internal/mirror"
-	"github.com/vinicgobbi/git-sync/internal/secrets"
 )
 
 type multiFlag []string
@@ -22,29 +21,22 @@ type multiFlag []string
 func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
-func cmdDiscover(ctx context.Context, e *env, args []string) error {
+func cmdDiscover(ctx context.Context, e *app.Env, args []string) error {
 	fs := flag.NewFlagSet("discover", flag.ContinueOnError)
 	var only multiFlag
 	fs.Var(&only, "source", "limitar a esta origem (repetível)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	var sources []mirror.Source
-	for _, in := range e.cfg.Sources() {
-		if len(only) > 0 && !contains(only, in.Name) {
-			continue
-		}
-		f, err := app.ConnectSource(in, e.store)
-		if err != nil {
-			return err
-		}
-		sources = append(sources, mirror.Source{Instance: in, Forge: f})
+	sources, err := e.Sources(only...)
+	if err != nil {
+		return err
 	}
 	if len(sources) == 0 {
 		return errors.New("nenhuma origem Gitea/Forgejo configurada")
 	}
 
-	res := mirror.Discover(ctx, sources, e.cfg.Instances, e.cfg.Defaults.Concurrency)
+	res := mirror.Discover(ctx, sources, e.Cfg.Instances, e.Cfg.Defaults.Concurrency)
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "ORIGEM\tREPO\tDESTINO\tREMOTE\tÚLTIMO SYNC\tERRO")
 	for _, l := range res.Links {
@@ -62,7 +54,7 @@ func cmdDiscover(ctx context.Context, e *env, args []string) error {
 	return nil
 }
 
-func cmdMirror(ctx context.Context, e *env, args []string) error {
+func cmdMirror(ctx context.Context, e *app.Env, args []string) error {
 	fs := flag.NewFlagSet("mirror", flag.ContinueOnError)
 	from := fs.String("from", "", "instância de origem (Gitea/Forgejo)")
 	var repos, targets multiFlag
@@ -71,8 +63,8 @@ func cmdMirror(ctx context.Context, e *env, args []string) error {
 	all := fs.Bool("all", false, "todos os repos onde você é admin (exceto forks e pull mirrors)")
 	owner := fs.String("owner", "", "com --all: só repos deste usuário/org")
 	vis := fs.String("visibility", "inherit", "inherit|public|private")
-	interval := fs.String("interval", e.cfg.Defaults.Interval, "intervalo de sync (ex.: 8h0m0s)")
-	onCommit := fs.Bool("sync-on-commit", e.cfg.Defaults.SyncOnCommit, "sincronizar a cada push na origem")
+	interval := fs.String("interval", e.Cfg.Defaults.Interval, "intervalo de sync (ex.: 8h0m0s)")
+	onCommit := fs.Bool("sync-on-commit", e.Cfg.Defaults.SyncOnCommit, "sincronizar a cada push na origem")
 	force := fs.Bool("force", false, "reaproveitar repo destino NÃO vazio (será sobrescrito)")
 	rollback := fs.Bool("rollback", true, "apagar repo criado se o mirror falhar")
 	dryRun := fs.Bool("dry-run", false, "só mostrar o plano")
@@ -85,11 +77,11 @@ func cmdMirror(ctx context.Context, e *env, args []string) error {
 		return errors.New("informe --from, ao menos um --to e --repo ou --all")
 	}
 
-	srcIn, ok := e.cfg.Find(*from)
+	srcIn, ok := e.Cfg.Find(*from)
 	if !ok {
 		return fmt.Errorf("instância %q não existe", *from)
 	}
-	src, err := app.ConnectSource(srcIn, e.store)
+	src, err := app.ConnectSource(srcIn, e.Store)
 	if err != nil {
 		return err
 	}
@@ -97,7 +89,7 @@ func cmdMirror(ctx context.Context, e *env, args []string) error {
 	req := &mirror.Request{
 		Source: srcIn, SourceForge: src,
 		Interval: *interval, SyncOnCommit: *onCommit,
-		Force: *force, Concurrency: e.cfg.Defaults.Concurrency,
+		Force: *force, Concurrency: e.Cfg.Defaults.Concurrency,
 	}
 	switch *vis {
 	case "inherit":
@@ -113,7 +105,8 @@ func cmdMirror(ctx context.Context, e *env, args []string) error {
 		return err
 	}
 	for _, spec := range targets {
-		t, err := buildTarget(ctx, e, spec)
+		name, owner, _ := strings.Cut(spec, ":")
+		t, err := e.BuildTarget(ctx, name, owner)
 		if err != nil {
 			return err
 		}
@@ -186,29 +179,6 @@ func selectRepos(ctx context.Context, src forge.Mirrorer, names []string, all bo
 	return out, nil
 }
 
-func buildTarget(ctx context.Context, e *env, spec string) (mirror.Target, error) {
-	name, owner, _ := strings.Cut(spec, ":")
-	in, ok := e.cfg.Find(name)
-	if !ok {
-		return mirror.Target{}, fmt.Errorf("destino %q não existe", name)
-	}
-	f, err := app.Connect(in, e.store)
-	if err != nil {
-		return mirror.Target{}, err
-	}
-	pass, err := secrets.MirrorToken(e.store, in.Name)
-	if err != nil {
-		return mirror.Target{}, fmt.Errorf("destino %q: %w", name, err)
-	}
-	user := in.User
-	if user == "" {
-		if user, err = f.Whoami(ctx); err != nil {
-			return mirror.Target{}, err
-		}
-	}
-	return mirror.Target{Instance: in, Forge: f, Owner: owner, Username: user, Password: pass}, nil
-}
-
 func printPlan(req *mirror.Request, plan *mirror.Plan) {
 	w := tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(w, "REPO\tDESTINO\tAÇÃO\tURL\tOBS")
@@ -225,15 +195,6 @@ func confirm(q string) bool {
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "s", "sim", "y", "yes":
 		return true
-	}
-	return false
-}
-
-func contains(xs []string, v string) bool {
-	for _, x := range xs {
-		if x == v {
-			return true
-		}
 	}
 	return false
 }
