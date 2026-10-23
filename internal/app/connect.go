@@ -2,7 +2,7 @@
 package app
 
 import (
-	"context"
+	"errors"
 	"fmt"
 
 	"github.com/vinicgobbi/git-sync/internal/config"
@@ -12,23 +12,21 @@ import (
 	"github.com/vinicgobbi/git-sync/internal/secrets"
 )
 
-// APIToken resolve o token de API conforme a forma de autenticação da instância.
-// Para tea/gh o token é pedido na hora, então tokens OAuth renovados são respeitados.
-func APIToken(ctx context.Context, in config.Instance, store secrets.Store) (string, error) {
-	switch in.Auth {
-	case config.AuthTea:
-		_, tok, err := secrets.TeaHelperToken(ctx, in.URL)
-		return tok, err
-	case config.AuthGh:
-		host := in.Host()
-		return secrets.GhToken(ctx, host)
+// ErrLegacyAuth: a instância vem de uma configuração antiga, que pegava o
+// token do login do tea ou do gh.
+var ErrLegacyAuth = errors.New("a instância usava o login do tea ou do gh, que não é mais suportado; edite-a e informe um token de acesso")
+
+// APIToken devolve o token de API da instância, guardado no keyring.
+func APIToken(in config.Instance, store secrets.Store) (string, error) {
+	if in.LegacyAuth != "" {
+		return "", ErrLegacyAuth
 	}
 	return secrets.APIToken(store, in.Name)
 }
 
 // Connect cria o cliente da instância.
 func Connect(in config.Instance, store secrets.Store) (forge.Forge, error) {
-	token, err := APIToken(context.Background(), in, store)
+	token, err := APIToken(in, store)
 	if err != nil {
 		return nil, fmt.Errorf("instância %q: %w", in.Name, err)
 	}

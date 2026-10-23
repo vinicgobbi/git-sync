@@ -1,9 +1,10 @@
 // Package secrets guarda tokens no keyring do sistema operacional.
 //
 // Cada instância tem duas chaves:
-//   - "<nome>"        token de API (só quando a instância não usa tea/gh)
-//   - "<nome>/mirror" token opcional gravado nos push mirrors que apontam para esta
-//     instância (se ausente, usa o token de API)
+//   - "<nome>"        token de API
+//   - "<nome>/mirror" token gravado nos push mirrors que apontam para esta
+//     instância (obrigatório no GitHub; no Gitea/Forgejo, se ausente, usa o
+//     token de API)
 package secrets
 
 import (

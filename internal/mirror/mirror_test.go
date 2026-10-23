@@ -3,6 +3,7 @@ package mirror
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 
@@ -20,6 +21,7 @@ type fakeForge struct {
 	failAdd   bool
 	deleted   []string
 	mirrorsOn bool
+	added     []forge.AddMirrorOpts // credenciais recebidas em AddPushMirror
 }
 
 func newFake(user, baseURL string) *fakeForge {
@@ -81,13 +83,24 @@ func (f *fakeForge) AddPushMirror(_ context.Context, o, n string, opts forge.Add
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	m := forge.PushMirror{RemoteName: "m", RemoteAddress: opts.RemoteAddress, Interval: opts.Interval}
+	f.added = append(f.added, opts)
+	m := forge.PushMirror{RemoteName: fmt.Sprintf("m%d", len(f.added)), RemoteAddress: opts.RemoteAddress,
+		Interval: opts.Interval, SyncOnCommit: opts.SyncOnCommit}
 	f.mirrors[o+"/"+n] = append(f.mirrors[o+"/"+n], m)
 	return &m, nil
 }
 func (f *fakeForge) SyncPushMirrors(context.Context, string, string) error { return nil }
-func (f *fakeForge) DeletePushMirror(context.Context, string, string, string) error {
-	return nil
+func (f *fakeForge) DeletePushMirror(_ context.Context, o, n, remote string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ms := f.mirrors[o+"/"+n]
+	for i, m := range ms {
+		if m.RemoteName == remote {
+			f.mirrors[o+"/"+n] = append(ms[:i:i], ms[i+1:]...)
+			return nil
+		}
+	}
+	return forge.ErrNotFound
 }
 
 var (
@@ -213,5 +226,62 @@ func TestNormalizeURL(t *testing.T) {
 		if got := forge.NormalizeURL(in); got != want {
 			t.Errorf("NormalizeURL(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestRenew: os espelhos que enviam para um destino são recriados com a
+// credencial nova, mantendo endereço, intervalo e envio a cada push; os
+// demais não mudam, e uma falha deixa o espelho antigo no lugar.
+func TestRenew(t *testing.T) {
+	ctx := context.Background()
+	req, src, _, _ := setup()
+	req.SyncOnCommit = true
+	plan, err := BuildPlan(ctx, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum := Execute(ctx, req, plan, ExecOptions{}, nil); sum.Failed != 0 {
+		t.Fatalf("execução: %+v", sum)
+	}
+	res := Discover(ctx, []Source{{Instance: srcIn, Forge: src}}, []config.Instance{srcIn, ghIn, cbIn}, 2)
+	var toGitHub []Link
+	for _, l := range res.Links {
+		if l.Target != nil && l.Target.Name == "github" {
+			toGitHub = append(toGitHub, l)
+		}
+	}
+	if len(toGitHub) != 3 {
+		t.Fatalf("esperava 3 espelhos para o GitHub, há %d", len(toGitHub))
+	}
+
+	before := len(src.added)
+	forges := map[string]forge.Mirrorer{"casa": src}
+	n, errs := Renew(ctx, forges, toGitHub, "vini-gh", "novo-token", 2)
+	if n != 3 || len(errs) != 0 {
+		t.Fatalf("Renew = %d, %v", n, errs)
+	}
+	for _, opts := range src.added[before:] {
+		if opts.Password != "novo-token" || opts.Username != "vini-gh" || opts.Interval != "8h0m0s" || !opts.SyncOnCommit {
+			t.Fatalf("espelho recriado com %+v", opts)
+		}
+	}
+	after := Discover(ctx, []Source{{Instance: srcIn, Forge: src}}, []config.Instance{srcIn, ghIn, cbIn}, 2)
+	if len(after.Links) != len(res.Links) {
+		t.Fatalf("o total de espelhos deveria continuar %d, ficou %d", len(res.Links), len(after.Links))
+	}
+	for _, l := range after.Links {
+		if l.Target.Name == "github" && l.Mirror.RemoteName == toGitHub[0].Mirror.RemoteName {
+			t.Fatalf("o espelho antigo %s deveria ter sido apagado", l.Mirror.RemoteName)
+		}
+	}
+
+	// se a criação falha, o antigo fica
+	src.failAdd = true
+	again := Discover(ctx, []Source{{Instance: srcIn, Forge: src}}, []config.Instance{srcIn, ghIn, cbIn}, 2)
+	if n, errs := Renew(ctx, forges, again.Links[:1], "u", "p", 1); n != 0 || len(errs) != 1 {
+		t.Fatalf("com falha: %d, %v", n, errs)
+	}
+	if got := Discover(ctx, []Source{{Instance: srcIn, Forge: src}}, []config.Instance{srcIn, ghIn, cbIn}, 2); len(got.Links) != len(again.Links) {
+		t.Fatal("uma falha ao recriar não pode apagar o espelho antigo")
 	}
 }

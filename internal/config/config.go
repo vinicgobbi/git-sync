@@ -29,24 +29,16 @@ func (k Kind) Valid() bool {
 	return false
 }
 
-// Auth diz de onde vem o token de API da instância.
-type Auth string
-
-const (
-	AuthKeyring Auth = ""    // token salvo no keyring pelo git-sync
-	AuthTea     Auth = "tea" // pedido ao tea a cada uso (suporta login OAuth, renovado pelo tea)
-	AuthGh      Auth = "gh"  // pedido ao gh a cada uso
-)
-
-func (a Auth) Valid() bool { return a == AuthKeyring || a == AuthTea || a == AuthGh }
-
 // Instance é um servidor git onde o usuário tem conta.
 type Instance struct {
 	Name string `yaml:"name"`
 	Kind Kind   `yaml:"kind"`
 	URL  string `yaml:"url"`
 	User string `yaml:"user"`
-	Auth Auth   `yaml:"auth,omitempty"`
+	// LegacyAuth é o "auth: tea|gh" de configurações antigas, quando o token
+	// vinha do login dessas ferramentas. Não é mais suportado: a instância
+	// fica sem credencial até ganhar um token de acesso (que limpa o campo).
+	LegacyAuth string `yaml:"auth,omitempty"`
 }
 
 // CanBeSource indica se a instância suporta push mirrors nativos.
@@ -148,9 +140,6 @@ func (c *Config) Validate() error {
 		u, err := url.Parse(in.URL)
 		if err != nil || u.Scheme == "" || u.Host == "" {
 			return fmt.Errorf("instância %q: URL inválida %q", in.Name, in.URL)
-		}
-		if !in.Auth.Valid() {
-			return fmt.Errorf("instância %q: auth inválido %q (use tea, gh ou omita)", in.Name, in.Auth)
 		}
 	}
 	return nil

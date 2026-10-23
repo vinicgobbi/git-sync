@@ -65,6 +65,7 @@ var (
 
 func newMirrorsView(sh *shared) *mirrorsView {
 	f := textinput.New()
+	_ = f.Cursor.SetMode(cursorMode)
 	f.Prompt = "/ "
 	f.Placeholder = "filtrar por repositório, instância ou URL"
 	return &mirrorsView{sh: sh, spin: spinner.New(spinner.WithSpinner(spinner.MiniDot)), filter: f, syncing: map[string]bool{}}
@@ -85,7 +86,7 @@ func (v *mirrorsView) Keys() []key.Binding {
 	case len(v.links) == 0:
 		return []key.Binding{mkNew, kRefresh}
 	}
-	return []key.Binding{mkNew, mkSync, mkOpen, mkRemove, mkFilter, kRefresh, mkSyncAll, mkOpenSrc, kUp, kDown}
+	return []key.Binding{mkNew, mkSync, mkOpen, mkRemove, mkFilter, kRefresh, mkSyncAll, mkOpenSrc, kRenew, kUp, kDown}
 }
 
 func (v *mirrorsView) load() tea.Cmd {
@@ -200,7 +201,7 @@ func (v *mirrorsView) handleKey(msg tea.KeyMsg) (view, tea.Cmd) {
 
 	cfg := v.sh.env.Cfg
 	if len(cfg.Instances) == 0 && key.Matches(msg, mkSetup) {
-		return v, open(newOnboarding(v.sh, false))
+		return v, open(newOnboarding(v.sh))
 	}
 	if len(cfg.Instances) > 0 && len(cfg.Sources()) == 0 && key.Matches(msg, mkSetup) {
 		return v, open(newInstanceForm(v.sh, nil))
@@ -241,6 +242,13 @@ func (v *mirrorsView) handleKey(msg tea.KeyMsg) (view, tea.Cmd) {
 		if l, ok := v.selected(); ok {
 			return v, openBrowser(l.Repo.HTMLURL)
 		}
+	case key.Matches(msg, kRenew):
+		if l, ok := v.selected(); ok {
+			if l.Target == nil {
+				return v, notify(toastErr, "O destino deste espelho ("+hostOf(l.Mirror.RemoteAddress)+") não está cadastrado no git-sync.")
+			}
+			return v, renew(v.sh, l.Target.Name, v.countTo(l.Target.Name))
+		}
 	case key.Matches(msg, mkRemove):
 		if l, ok := v.selected(); ok {
 			return v, confirm("Remover este espelho?",
@@ -251,6 +259,17 @@ func (v *mirrorsView) handleKey(msg tea.KeyMsg) (view, tea.Cmd) {
 	}
 	v.scroll()
 	return v, nil
+}
+
+// countTo conta os espelhos que enviam para a instância name.
+func (v *mirrorsView) countTo(name string) int {
+	n := 0
+	for _, l := range v.links {
+		if l.Target != nil && l.Target.Name == name {
+			n++
+		}
+	}
+	return n
 }
 
 // HandleEsc limpa o filtro aplicado antes de o esc voltar ao menu.

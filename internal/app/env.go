@@ -30,9 +30,12 @@ func GuessKind(ctx context.Context, rawURL string) config.Kind {
 	return DetectKind(ctx, rawURL)
 }
 
+// ErrNoMirrorToken: um destino GitHub precisa de token de mirror dedicado.
+var ErrNoMirrorToken = errors.New("destinos GitHub precisam de um token de mirror dedicado (Contents e Workflows: read and write); edite a instância e informe-o")
+
 // AddInstance grava os tokens, valida o login (preenchendo User) e salva a config.
-// Com Auth tea/gh nenhum token de API é salvo: ele é pedido à ferramenta a cada uso.
-// token ou mirrorToken vazios mantêm os tokens já salvos, se houver.
+// Ao editar, token ou mirrorToken vazios mantêm os já salvos. No GitHub o
+// token de mirror é obrigatório: os espelhos não podem usar o token de API.
 func (e *Env) AddInstance(ctx context.Context, in config.Instance, token, mirrorToken string) (config.Instance, error) {
 	in.URL = strings.TrimSuffix(strings.TrimSpace(in.URL), "/")
 	if in.Name == "" || in.URL == "" {
@@ -41,18 +44,20 @@ func (e *Env) AddInstance(ctx context.Context, in config.Instance, token, mirror
 	if in.Kind == "" {
 		in.Kind = GuessKind(ctx, in.URL)
 	}
-	if in.Auth == config.AuthKeyring {
-		if token == "" {
-			token, _ = e.Store.Get(in.Name)
+	if token == "" && in.LegacyAuth == "" {
+		token, _ = e.Store.Get(in.Name)
+	}
+	if token == "" {
+		return in, errors.New("informe o token de acesso")
+	}
+	if in.Kind == config.KindGitHub && mirrorToken == "" {
+		if _, err := e.Store.Get(secrets.MirrorKey(in.Name)); err != nil {
+			return in, ErrNoMirrorToken
 		}
-		if token == "" {
-			return in, errors.New("informe o token de API")
-		}
-		if err := e.Store.Set(in.Name, token); err != nil {
-			return in, fmt.Errorf("salvando no keyring: %w", err)
-		}
-	} else {
-		_ = e.Store.Delete(in.Name) // não deixa token antigo esquecido no keyring
+	}
+	in.LegacyAuth = ""
+	if err := e.Store.Set(in.Name, token); err != nil {
+		return in, fmt.Errorf("salvando no keyring: %w", err)
 	}
 	if mirrorToken != "" {
 		if err := e.Store.Set(secrets.MirrorKey(in.Name), mirrorToken); err != nil {
@@ -82,74 +87,9 @@ func (e *Env) RemoveInstance(name string) error {
 	return e.Save()
 }
 
-// Candidate é um login encontrado no tea ou no gh que pode virar instância.
-// A instância criada referencia o login (Auth tea/gh): nenhum token é copiado.
-type Candidate struct {
-	Name   string
-	URL    string
-	Kind   config.Kind // vazio = detectar ao importar
-	User   string
-	From   string // "tea" ou "gh"
-	OAuth  bool   // login OAuth do tea (token expira; o tea renova)
-	Exists bool   // já existe instância com esse nome
-}
-
-// Candidates lista os logins do tea e do gh disponíveis para importação.
-func (e *Env) Candidates(ctx context.Context) ([]Candidate, error) {
-	var out []Candidate
-	logins, err := secrets.TeaLogins()
-	if err != nil {
-		return nil, fmt.Errorf("lendo config do tea: %w", err)
-	}
-	for _, l := range logins {
-		out = append(out, Candidate{Name: l.Name, URL: strings.TrimSuffix(l.URL, "/"), User: l.User, From: "tea", OAuth: l.OAuth()})
-	}
-	if tok, err := secrets.GhToken(ctx, "github.com"); err == nil && tok != "" {
-		out = append(out, Candidate{Name: "github", URL: "https://github.com", Kind: config.KindGitHub, From: "gh"})
-	}
-	for i := range out {
-		_, out[i].Exists = e.Cfg.Find(out[i].Name)
-	}
-	return out, nil
-}
-
-// ImportCandidate cadastra o candidato (validando o acesso).
-func (e *Env) ImportCandidate(ctx context.Context, c Candidate) (config.Instance, error) {
-	auth := config.AuthTea
-	if c.From == "gh" {
-		auth = config.AuthGh
-	}
-	return e.AddInstance(ctx, config.Instance{Name: c.Name, URL: c.URL, Kind: c.Kind, Auth: auth}, "", "")
-}
-
-type ImportItem struct {
-	Name    string
-	From    string // "tea" ou "gh"
-	Skipped bool   // já existia
-	Inst    config.Instance
-	Err     error
-}
-
-// Import importa todos os candidatos (pulando os já existentes, salvo overwrite).
-func (e *Env) Import(ctx context.Context, overwrite bool) ([]ImportItem, error) {
-	cands, err := e.Candidates(ctx)
-	if err != nil {
-		return nil, err
-	}
-	items := make([]ImportItem, len(cands))
-	for i, c := range cands {
-		items[i] = ImportItem{Name: c.Name, From: c.From, Skipped: c.Exists && !overwrite}
-		if !items[i].Skipped {
-			items[i].Inst, items[i].Err = e.ImportCandidate(ctx, c)
-		}
-	}
-	return items, nil
-}
-
 type InstanceStatus struct {
 	User            string
 	MirrorToken     bool // tem token dedicado para mirrors
-	OAuth           bool // credencial vem de login OAuth do tea (não serve para mirrors)
 	MirrorsDisabled bool
 	Err             error
 }
@@ -167,7 +107,6 @@ func (e *Env) CheckInstance(ctx context.Context, in config.Instance) InstanceSta
 	}
 	_, err = e.Store.Get(secrets.MirrorKey(in.Name))
 	st.MirrorToken = err == nil
-	st.OAuth = in.Auth == config.AuthTea && teaLoginIsOAuth(in)
 	if src, ok := f.(forge.Mirrorer); ok && in.CanBeSource() {
 		on, err := src.MirrorsEnabled(ctx)
 		st.Err, st.MirrorsDisabled = err, err == nil && !on
@@ -191,29 +130,17 @@ func (e *Env) Sources(only ...string) ([]mirror.Source, error) {
 	return out, nil
 }
 
-// ErrOAuthMirror: um token OAuth expira e não pode ser gravado num push mirror.
-var ErrOAuthMirror = errors.New("o login desta instância é OAuth (o token expira em poucas horas) e não serve como credencial do espelho; cadastre um token de mirror dedicado na instância")
-
 // MirrorPassword resolve a credencial gravada nos push mirrors que apontam para in:
-// o token de mirror dedicado ou, na falta dele, o token de API (exceto OAuth).
-func (e *Env) MirrorPassword(ctx context.Context, in config.Instance) (string, error) {
+// o token de mirror dedicado ou, na falta dele, o token de API (só no
+// Gitea/Forgejo; no GitHub o token de mirror é obrigatório).
+func (e *Env) MirrorPassword(in config.Instance) (string, error) {
 	if tok, err := e.Store.Get(secrets.MirrorKey(in.Name)); err == nil {
 		return tok, nil
 	}
-	if in.Auth == config.AuthTea && teaLoginIsOAuth(in) {
-		return "", ErrOAuthMirror
+	if in.Kind == config.KindGitHub {
+		return "", ErrNoMirrorToken
 	}
-	return APIToken(ctx, in, e.Store)
-}
-
-func teaLoginIsOAuth(in config.Instance) bool {
-	logins, _ := secrets.TeaLogins()
-	for _, l := range logins {
-		if strings.EqualFold(strings.TrimSuffix(l.URL, "/"), in.URL) || l.Name == in.Name {
-			return l.OAuth()
-		}
-	}
-	return false
+	return APIToken(in, e.Store)
 }
 
 // BuildTarget monta um destino com as credenciais que serão gravadas no mirror.
@@ -226,7 +153,7 @@ func (e *Env) BuildTarget(ctx context.Context, name, owner string) (mirror.Targe
 	if err != nil {
 		return mirror.Target{}, err
 	}
-	pass, err := e.MirrorPassword(ctx, in)
+	pass, err := e.MirrorPassword(in)
 	if err != nil {
 		return mirror.Target{}, fmt.Errorf("destino %q: %w", name, err)
 	}
@@ -246,4 +173,44 @@ func contains(xs []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// RenewResult é o resultado de RenewMirrors.
+type RenewResult struct {
+	Found   int     // espelhos que enviam para a instância
+	Renewed int     // recriados com a credencial atual
+	Errors  []error // falhas ao recriar e origens que não puderam ser lidas
+}
+
+// RenewMirrors grava a credencial atual de name (ver MirrorPassword) em todos
+// os push mirrors que enviam para ela, em todas as origens. Serve para depois
+// de trocar o token: os espelhos guardam uma cópia da credencial de quando
+// foram criados.
+func (e *Env) RenewMirrors(ctx context.Context, name string) (RenewResult, error) {
+	var res RenewResult
+	t, err := e.BuildTarget(ctx, name, "")
+	if err != nil {
+		return res, err
+	}
+	srcs, err := e.Sources()
+	if err != nil {
+		return res, err
+	}
+	forges := map[string]forge.Mirrorer{}
+	for _, s := range srcs {
+		forges[s.Instance.Name] = s.Forge
+	}
+	found := mirror.Discover(ctx, srcs, e.Cfg.Instances, e.Cfg.Defaults.Concurrency)
+	res.Errors = found.Errors
+	var links []mirror.Link
+	for _, l := range found.Links {
+		if l.Target != nil && l.Target.Name == name {
+			links = append(links, l)
+		}
+	}
+	res.Found = len(links)
+	var errs []error
+	res.Renewed, errs = mirror.Renew(ctx, forges, links, t.Username, t.Password, e.Cfg.Defaults.Concurrency)
+	res.Errors = append(res.Errors, errs...)
+	return res, nil
 }

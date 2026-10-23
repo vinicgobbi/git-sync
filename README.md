@@ -42,7 +42,7 @@ plano e avisa no cabeçalho quando há uma nova; para desligar a consulta, defin
 ## Uso
 
 Sem argumentos, `git-sync` abre a interface (TUI). Na primeira vez, um guia explica o conceito e
-encontra seus logins do `tea` e do `gh`.
+abre o cadastro da primeira conta, mostrando como criar os tokens (veja [Credenciais](#credenciais)).
 
 As ações ficam num menu à esquerda (Espelhos, Instâncias e Esta ferramenta). O painel à direita mostra
 a tela do item selecionado ou, numa ação, o que ela faz e o comando equivalente. Sob o título, uma linha
@@ -54,18 +54,20 @@ mostra **o próximo passo** (cadastrar a origem, o destino, criar o primeiro esp
   `x` remove, `/` filtra.
 - **Novo espelho**: assistente em etapas (origem → repositórios → destinos → opções → revisão → execução).
   Nada é alterado antes da revisão, e rodar de novo não duplica nada.
-- **Instâncias**: contas cadastradas, testadas na hora; `a` adiciona, `enter` edita, `i` importa do tea/gh.
-- **Diagnóstico**: git, gh, tea e keyring.
+- **Instâncias**: contas cadastradas, testadas na hora; `a` adiciona, `enter` edita, `c` renova a
+  credencial dos espelhos que enviam para a instância.
+- **Diagnóstico**: keyring do sistema e arquivo de configuração.
 
 `?` mostra todos os atalhos da tela atual.
 
 A mesma funcionalidade existe como CLI:
 
 ```sh
-git-sync doctor                 # verifica git, gh, tea, logins e tokens
-git-sync instance import        # importa logins do tea e do gh
-git-sync instance add --name codeberg --url https://codeberg.org [--mirror-token]
-git-sync instance add --name casa --url https://git.casa.lan --auth tea   # usa o login do tea
+git-sync doctor                 # verifica o keyring e o acesso de cada instância
+git-sync instance add --name casa --url https://git.casa.lan
+git-sync instance add --name codeberg --url https://codeberg.org --mirror-token
+git-sync instance add --name github --url https://github.com   # pede também o token de mirror
+git-sync instance renew github  # grava o token atual nos espelhos que enviam para o GitHub
 git-sync discover               # lista push mirrors existentes
 git-sync mirror --from casa --repo eu/app --to github --to codeberg:minha-org --dry-run
 git-sync mirror --from casa --all --owner eu --to github
@@ -77,22 +79,39 @@ A configuração fica em `~/.config/git-sync/config.yaml`.
 
 ### Credenciais
 
-Cada instância obtém seu token de uma destas formas:
+Toda a autenticação é feita por **tokens de acesso**, guardados no keyring do sistema (nunca no
+arquivo de configuração). Na interface, o formulário de cada instância mostra onde criar cada token
+e quais permissões dar. Na CLI, os tokens são pedidos sem eco ou lidos de `GIT_SYNC_TOKEN` e
+`GIT_SYNC_MIRROR_TOKEN`.
 
-- **Login do tea** (`auth: tea`): o token é pedido ao `tea login helper` a cada uso, inclusive para
-  logins **OAuth** (o tea os renova sozinho). Nada é copiado.
-- **Login do gh** (`auth: gh`): o mesmo, via `gh auth token`.
-- **Token de acesso**: digitado no git-sync e guardado no keyring do sistema.
+Cada instância tem dois tokens:
 
-### Tokens de mirror
+- **Token de acesso**: usado pelo git-sync na API, para listar repositórios, criar os destinos e
+  configurar os espelhos.
+- **Token de mirror**: fica gravado em cada espelho, no servidor de origem, que o usa para enviar ao
+  destino. Como sai do seu controle, deve poder só enviar commits. **Obrigatório no GitHub.** No
+  Gitea/Forgejo é opcional: sem ele, os espelhos usam o token de acesso.
 
-O token do destino fica gravado no servidor de origem. Prefira um token dedicado
-(`--mirror-token`). No GitHub, use um fine-grained PAT com **Contents: write** e
-**Workflows: write** (sem este, pushes que alteram `.github/workflows` falham).
+| Instância | Token | Onde criar | Permissões |
+|---|---|---|---|
+| Gitea/Forgejo | acesso | `<endereço>/user/settings/applications` | repository: leitura e escrita; organization: leitura e escrita (leitura basta se não for criar repositórios em organizações); user: leitura |
+| Gitea/Forgejo | mirror | `<endereço>/user/settings/applications` | repository: leitura e escrita |
+| GitHub | acesso | `github.com/settings/personal-access-tokens/new` (fine-grained; resource owner: sua conta ou a organização de destino; All repositories) | Administration: Read and write; Contents: Read-only |
+| GitHub | mirror | idem | Contents: Read and write; Workflows: Read and write (sem esta, pushes que alteram `.github/workflows` falham) |
 
-Logins OAuth expiram em poucas horas, então não servem como credencial de espelho: para usar uma
-instância com login OAuth como **destino**, cadastre um token de mirror nela. Como **origem**, o
-OAuth funciona sem nada extra.
+Nas origens, sua conta precisa ser administradora dos repositórios espelhados.
+
+### Trocar um token
+
+Cada espelho guarda uma **cópia** do token de mirror (ou de acesso) de quando foi criado, e a API não
+permite editá-la. Se o token vencer ou for revogado, os envios falham. Depois de cadastrar o token
+novo na instância, renove os espelhos: `c` em Instâncias ou em Espelhos, ou `git-sync instance renew
+NOME`. Ao editar uma instância pela interface, o git-sync já oferece a renovação. Cada espelho é
+recriado com o mesmo endereço, intervalo e envio a cada push; o novo é criado antes de o antigo ser
+apagado, então uma falha não deixa o repositório sem espelho.
+
+Configurações antigas com `auth: tea` ou `auth: gh` (o token vinha do login dessas ferramentas) não
+são mais suportadas: a instância aparece sem credencial até você editá-la e informar um token.
 
 ## Desenvolvimento
 

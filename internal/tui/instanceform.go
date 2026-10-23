@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -12,6 +13,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/vinicgobbi/git-sync/internal/config"
+	"github.com/vinicgobbi/git-sync/internal/secrets"
 )
 
 type formField int
@@ -20,7 +22,6 @@ const (
 	ffKind formField = iota
 	ffURL
 	ffName
-	ffAuth
 	ffToken
 	ffMirrorToken
 	ffSave
@@ -41,7 +42,6 @@ type instanceForm struct {
 	sh          *shared
 	editing     *config.Instance
 	kindIdx     int
-	auth        config.Auth
 	url         textinput.Model
 	name        textinput.Model
 	token       textinput.Model
@@ -54,6 +54,7 @@ type instanceForm struct {
 	saving      bool
 	fieldErr    map[formField]string
 	err         error
+	credChanged bool // um token novo foi informado ao editar
 }
 
 type instanceSavedMsg struct {
@@ -70,8 +71,13 @@ var (
 	fkCancel = bind([]string{"esc"}, "esc", "cancelar")
 )
 
+// cursorMode é o cursor dos campos de texto; os testes usam um fixo, porque
+// o piscar é um comando com espera que o driver síncrono executaria.
+var cursorMode = cursor.CursorBlink
+
 func newInput(placeholder string, password bool) textinput.Model {
 	ti := textinput.New()
+	_ = ti.Cursor.SetMode(cursorMode)
 	ti.Prompt = ""
 	ti.Placeholder = placeholder
 	ti.Width = 48
@@ -102,11 +108,6 @@ func newInstanceForm(sh *shared, existing *config.Instance) *instanceForm {
 		f.url.SetValue(existing.URL)
 		f.name.SetValue(existing.Name)
 		f.nameTouched = true
-		f.auth = existing.Auth
-		if existing.Auth == config.AuthKeyring {
-			f.token.Placeholder = "deixe vazio para manter o atual"
-		}
-		f.mirrorToken.Placeholder = "deixe vazio para manter o atual"
 	}
 	f.rebuild()
 	if existing != nil {
@@ -136,25 +137,33 @@ func (f *instanceForm) Init() tea.Cmd { return textinput.Blink }
 
 func (f *instanceForm) kind() config.Kind { return kindOptions[f.kindIdx].kind }
 
-// authOptions depende do tipo: tea serve Gitea/Forgejo, gh serve GitHub.
-func (f *instanceForm) authOptions() []config.Auth {
-	switch f.kind() {
-	case config.KindGitHub:
-		return []config.Auth{config.AuthKeyring, config.AuthGh}
-	case config.KindGitea, config.KindForgejo:
-		return []config.Auth{config.AuthKeyring, config.AuthTea}
+// effKind é o tipo escolhido ou, em "Detectar", o que dá para saber pela URL.
+func (f *instanceForm) effKind() config.Kind {
+	if k := f.kind(); k != "" {
+		return k
 	}
-	return []config.Auth{config.AuthKeyring, config.AuthTea, config.AuthGh}
+	if u, err := url.Parse(strings.TrimSpace(f.url.Value())); err == nil && strings.EqualFold(u.Hostname(), "github.com") {
+		return config.KindGitHub
+	}
+	return ""
 }
 
-func authOptionLabel(a config.Auth) string {
-	switch a {
-	case config.AuthTea:
-		return "Usar o login do tea"
-	case config.AuthGh:
-		return "Usar o login do gh"
+// needsToken: instância nova, ou de uma configuração antiga sem token.
+func (f *instanceForm) needsToken() bool {
+	return f.editing == nil || f.editing.LegacyAuth != ""
+}
+
+// hasMirrorToken: a instância editada já tem token de mirror salvo.
+func (f *instanceForm) hasMirrorToken() bool {
+	if f.editing == nil {
+		return false
 	}
-	return "Token de acesso"
+	_, err := f.sh.env.Store.Get(secrets.MirrorKey(f.editing.Name))
+	return err == nil
+}
+
+func (f *instanceForm) needsMirrorToken() bool {
+	return f.effKind() == config.KindGitHub && !f.hasMirrorToken()
 }
 
 func (f *instanceForm) rebuild() {
@@ -162,28 +171,36 @@ func (f *instanceForm) rebuild() {
 	if f.focus < len(f.fields) {
 		cur = f.fields[f.focus]
 	}
-	opts := f.authOptions()
-	valid := false
-	for _, a := range opts {
-		valid = valid || a == f.auth
-	}
-	if !valid {
-		f.auth = config.AuthKeyring
-	}
 	f.fields = []formField{ffKind, ffURL}
 	if f.editing == nil {
 		f.fields = append(f.fields, ffName)
 	}
-	f.fields = append(f.fields, ffAuth)
-	if f.auth == config.AuthKeyring {
-		f.fields = append(f.fields, ffToken)
-	}
-	f.fields = append(f.fields, ffMirrorToken, ffSave)
+	f.fields = append(f.fields, ffToken, ffMirrorToken, ffSave)
 	f.focus = 0
 	for i, ff := range f.fields {
 		if ff == cur {
 			f.focus = i
 		}
+	}
+	f.updatePlaceholders()
+}
+
+func (f *instanceForm) updatePlaceholders() {
+	switch {
+	case f.editing != nil && f.editing.LegacyAuth != "":
+		f.token.Placeholder = "obrigatório: a instância usava o login do " + f.editing.LegacyAuth
+	case f.editing != nil:
+		f.token.Placeholder = "deixe vazio para manter o atual"
+	default:
+		f.token.Placeholder = "cole o token aqui"
+	}
+	switch {
+	case f.needsMirrorToken():
+		f.mirrorToken.Placeholder = "obrigatório no GitHub"
+	case f.hasMirrorToken():
+		f.mirrorToken.Placeholder = "deixe vazio para manter o atual"
+	default:
+		f.mirrorToken.Placeholder = "opcional"
 	}
 }
 
@@ -235,16 +252,6 @@ func (f *instanceForm) cycle(delta int) {
 			f.suggestName()
 		}
 		f.rebuild()
-	case ffAuth:
-		opts := f.authOptions()
-		i := 0
-		for j, a := range opts {
-			if a == f.auth {
-				i = j
-			}
-		}
-		f.auth = opts[(i+delta+len(opts))%len(opts)]
-		f.rebuild()
 	}
 }
 
@@ -286,7 +293,13 @@ func (f *instanceForm) Update(msg tea.Msg) (view, tea.Cmd) {
 			return f, nil
 		}
 		text := msg.in.Name + " conectada como " + msg.in.User
-		return f, tea.Batch(closeFlow(), notify(toastOK, text))
+		cmds := []tea.Cmd{closeFlow(), notify(toastOK, text)}
+		if f.editing != nil && f.credChanged {
+			// os espelhos que já enviam para cá guardam o token antigo
+			name := msg.in.Name
+			cmds = append(cmds, func() tea.Msg { return credChangedMsg{name} })
+		}
+		return f, tea.Batch(cmds...)
 	case tea.KeyMsg:
 		if f.saving {
 			return f, nil
@@ -328,6 +341,7 @@ func (f *instanceForm) handleKey(msg tea.KeyMsg) (view, tea.Cmd) {
 		switch f.current() {
 		case ffURL:
 			f.suggestName()
+			f.updatePlaceholders()
 		case ffName:
 			f.nameTouched = true
 		}
@@ -359,8 +373,11 @@ func (f *instanceForm) validate() bool {
 			f.fieldErr[ffName] = "já existe uma instância com esse nome"
 		}
 	}
-	if f.auth == config.AuthKeyring && f.editing == nil && strings.TrimSpace(f.token.Value()) == "" {
+	if f.needsToken() && strings.TrimSpace(f.token.Value()) == "" {
 		f.fieldErr[ffToken] = "cole o token de acesso"
+	}
+	if f.needsMirrorToken() && strings.TrimSpace(f.mirrorToken.Value()) == "" {
+		f.fieldErr[ffMirrorToken] = "o GitHub precisa de um token de mirror"
 	}
 	for i, ff := range f.fields {
 		if _, bad := f.fieldErr[ff]; bad {
@@ -380,9 +397,9 @@ func (f *instanceForm) save() tea.Cmd {
 		Name: strings.TrimSpace(f.name.Value()),
 		URL:  strings.TrimSpace(f.url.Value()),
 		Kind: f.kind(),
-		Auth: f.auth,
 	}
 	token, mirrorToken := strings.TrimSpace(f.token.Value()), strings.TrimSpace(f.mirrorToken.Value())
+	f.credChanged = token != "" || mirrorToken != ""
 	f.saving = true
 	sh := f.sh
 	return tea.Batch(f.spin.Tick, func() tea.Msg {
@@ -392,10 +409,6 @@ func (f *instanceForm) save() tea.Cmd {
 }
 
 func (f *instanceForm) hint(ff formField) string {
-	base := strings.TrimSuffix(strings.TrimSpace(f.url.Value()), "/")
-	if base == "" {
-		base = "<endereço>"
-	}
 	switch ff {
 	case ffKind:
 		return "Gitea e Forgejo podem ser origem e destino. O GitHub é sempre destino."
@@ -403,35 +416,25 @@ func (f *instanceForm) hint(ff formField) string {
 		return "Endereço que você abre no navegador."
 	case ffName:
 		return "Apelido usado na interface. Sugerido a partir do endereço."
-	case ffAuth:
-		switch f.auth {
-		case config.AuthTea:
-			return "Usa o login que o tea já tem para este endereço, inclusive OAuth. Nenhum token é copiado: o git-sync pede ao tea quando precisa, e o tea renova o OAuth sozinho."
-		case config.AuthGh:
-			return "Usa o login do GitHub CLI (gh auth login). Nenhum token é copiado."
-		}
-		return "Um token que você cria na instância. Fica guardado no keyring do sistema."
-	case ffToken:
-		if f.kind() == config.KindGitHub {
-			return "Crie em github.com/settings/personal-access-tokens/new com acesso aos repositórios e permissões Administration: write (criar repositórios) e Contents: read."
-		}
-		return "Crie em " + base + "/user/settings/applications com leitura e escrita em repository e leitura em user e organization."
-	case ffMirrorToken:
-		if f.kind() == config.KindGitHub {
-			return "Credencial que a origem usa para enviar para cá. Use um fine-grained PAT com Contents: write e Workflows: write; sem Workflows, pushes que alteram .github/workflows falham."
-		}
-		if f.auth == config.AuthTea {
-			return "Necessário para usar esta instância como destino se o login do tea for OAuth (tokens OAuth expiram). Token com escrita em repository."
-		}
-		return "Credencial que a origem usa para enviar para cá. Se vazio, usa a credencial da API. Token com escrita em repository."
 	}
 	return ""
+}
+
+// guide é o painel sob o formulário: como criar o token do campo em foco
+// ou, nos demais campos, quais tokens o tipo precisa.
+func (f *instanceForm) guide(w int) string {
+	base := strings.TrimSuffix(strings.TrimSpace(f.url.Value()), "/")
+	if ff := f.current(); ff == ffToken || ff == ffMirrorToken {
+		title, lines := tokenGuide(f.effKind(), base, ff == ffMirrorToken)
+		return renderGuide(title, lines, w)
+	}
+	return sBold.Render("Tokens") + "\n" + wrap(tokenOverview(f.effKind()), w)
 }
 
 func (f *instanceForm) View(w, h int) string {
 	cw := min(w-4, 92)
 	labels := map[formField]string{
-		ffKind: "Tipo", ffURL: "Endereço", ffName: "Nome", ffAuth: "Credencial",
+		ffKind: "Tipo", ffURL: "Endereço", ffName: "Nome",
 		ffToken: "Token de acesso", ffMirrorToken: "Token de mirror",
 	}
 	var b strings.Builder
@@ -456,16 +459,14 @@ func (f *instanceForm) View(w, h int) string {
 		switch ff {
 		case ffKind:
 			value = selector(kindOptions[f.kindIdx].label, focused)
-		case ffAuth:
-			value = selector(authOptionLabel(f.auth), focused)
 		default:
 			value = f.inputFor(ff).View()
 		}
 		b.WriteString(marker + label + value + "\n")
 		if msg, bad := f.fieldErr[ff]; bad {
 			b.WriteString(strings.Repeat(" ", 20) + sErr.Render("✘ "+msg) + "\n")
-		} else if focused {
-			b.WriteString(indentBlock(sMuted.Render(wrap(f.hint(ff), cw-22)), 20) + "\n")
+		} else if hint := f.hint(ff); focused && hint != "" {
+			b.WriteString(indentBlock(sMuted.Render(wrap(hint, cw-22)), 20) + "\n")
 		}
 	}
 
@@ -481,6 +482,8 @@ func (f *instanceForm) View(w, h int) string {
 		b.WriteString("\n" + lipgloss.NewStyle().MarginLeft(2).Border(lipgloss.NormalBorder(), false, false, false, true).
 			BorderForeground(colErr).PaddingLeft(1).Render(text) + "\n")
 	}
+	b.WriteString("\n" + lipgloss.NewStyle().MarginLeft(2).Border(lipgloss.NormalBorder(), false, false, false, true).
+		BorderForeground(colAccent).PaddingLeft(1).Render(f.guide(cw-6)) + "\n")
 	return b.String()
 }
 

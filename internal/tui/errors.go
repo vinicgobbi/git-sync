@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/vinicgobbi/git-sync/internal/app"
 	"github.com/vinicgobbi/git-sync/internal/forge"
 	"github.com/vinicgobbi/git-sync/internal/secrets"
 )
@@ -26,6 +27,10 @@ func humanize(err error) friendly {
 	var uerr *url.Error
 	var nerr net.Error
 	switch {
+	case errors.Is(err, app.ErrLegacyAuth):
+		return friendly{"Sem token de acesso", "Esta instância usava o login do tea ou do gh, que não é mais suportado. Edite-a e informe um token."}
+	case errors.Is(err, app.ErrNoMirrorToken):
+		return friendly{"Falta o token de mirror", "Destinos GitHub precisam de um token de mirror (Contents e Workflows: read and write). Edite a instância e informe-o."}
 	case errors.Is(err, secrets.ErrNotFound):
 		return friendly{"Token não encontrado no keyring", "Edite a instância em Instâncias e informe o token."}
 	case errors.Is(err, context.DeadlineExceeded):
@@ -74,7 +79,8 @@ func mirrorHint(lastError string) string {
 	case strings.Contains(l, "workflow") && (strings.Contains(l, "scope") || strings.Contains(l, "permission")):
 		return "O token do destino não pode alterar .github/workflows. No GitHub, dê a permissão Workflows: write ao token de mirror."
 	case strings.Contains(l, "authentication failed"), strings.Contains(l, "401"), strings.Contains(l, "invalid username or password"):
-		return "A credencial gravada no espelho foi recusada. Atualize o token de mirror do destino e recrie o espelho."
+		return "A credencial gravada no espelho foi recusada (o token venceu ou foi revogado). Gere um token novo, " +
+			"atualize a instância de destino em Instâncias e renove a credencial dos espelhos (c)."
 	case strings.Contains(l, "403"), strings.Contains(l, "permission"), strings.Contains(l, "denied"):
 		return "O token de mirror não tem permissão de escrita no repositório de destino."
 	case strings.Contains(l, "could not resolve host"), strings.Contains(l, "connection refused"), strings.Contains(l, "timed out"):

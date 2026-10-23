@@ -24,11 +24,11 @@ Uso:
 Sem comando, abre a interface (TUI).
 
 Comandos:
-  doctor                       verifica git, gh, tea e logins
+  doctor                       verifica o keyring e o acesso de cada instância
   instance list                lista instâncias configuradas
-  instance add  [flags]        adiciona/atualiza instância (pede o token)
+  instance add  [flags]        adiciona/atualiza instância (pede os tokens)
   instance rm   NOME           remove instância e seus tokens
-  instance import              importa logins do tea e do gh
+  instance renew NOME          grava o token atual nos espelhos que enviam para NOME
   discover                     lista push mirrors existentes nas origens
   mirror [flags]               cria repos nos destinos e configura push mirrors
   install [flags]              instala este binário no seu PATH (sem admin)

@@ -8,13 +8,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/bubbles/cursor"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/vinicgobbi/git-sync/internal/app"
 	"github.com/vinicgobbi/git-sync/internal/config"
+	"github.com/vinicgobbi/git-sync/internal/forge"
 	"github.com/vinicgobbi/git-sync/internal/forge/gitea"
+	"github.com/vinicgobbi/git-sync/internal/mirror"
 	"github.com/vinicgobbi/git-sync/internal/secrets"
 )
 
@@ -26,7 +29,8 @@ type driver struct {
 
 func newDriver(t *testing.T, env *app.Env) *driver {
 	tick = func(time.Duration, func(time.Time) tea.Msg) tea.Cmd { return nil }
-	t.Cleanup(func() { tick = tea.Tick })
+	cursorMode = cursor.CursorStatic
+	t.Cleanup(func() { tick, cursorMode = tea.Tick, cursor.CursorBlink })
 	d := &driver{t: t, m: newModel(context.Background(), env, "test")}
 	d.send(tea.WindowSizeMsg{Width: 150, Height: 45})
 	d.run(d.m.Init())
@@ -56,7 +60,7 @@ func (d *driver) run(cmd tea.Cmd) {
 
 var namedKeys = map[string]tea.KeyType{
 	"enter": tea.KeyEnter, "esc": tea.KeyEsc, "up": tea.KeyUp, "down": tea.KeyDown,
-	"left": tea.KeyLeft, "right": tea.KeyRight, "tab": tea.KeyTab,
+	"left": tea.KeyLeft, "right": tea.KeyRight, "tab": tea.KeyTab, "shift+tab": tea.KeyShiftTab,
 	"ctrl+a": tea.KeyCtrlA, "ctrl+u": tea.KeyCtrlU, "ctrl+s": tea.KeyCtrlS,
 }
 
@@ -147,7 +151,7 @@ func TestE2E(t *testing.T) {
 	d.typeText(fURL)
 	d.key("tab", "ctrl+u")
 	d.typeText("fj")
-	d.key("tab", "tab") // credencial (token) → campo do token
+	d.key("tab") // campo do token
 	d.typeText(fTok)
 	d.key("ctrl+s")
 	d.mustSee("fj conectada como vini")
@@ -227,10 +231,15 @@ func TestOnboardingFirstRun(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())            // sem gh/tea
 	env := &app.Env{CfgPath: filepath.Join(t.TempDir(), "c.yaml"), Cfg: config.New(), Store: secrets.Memory{}}
 	d := newDriver(t, env)
-	d.mustSee("Primeiros passos", "Bem-vindo ao git-sync", "push mirror")
+	d.mustSee("Primeiros passos", "Bem-vindo ao git-sync", "push mirror", "token de acesso")
+	d.key("enter") // abre o cadastro da primeira conta
+	d.mustSee("Adicionar instância", "Token de acesso", "Tokens")
+	d.key("esc") // desiste: volta ao resumo
+	d.mustSee("Resumo", "Ainda falta uma origem")
 	d.key("enter")
-	d.mustSee("Não encontramos logins")
-	d.key("esc", "esc")
+	if len(d.m.flows) != 0 {
+		t.Fatalf("enter no resumo deveria fechar o guia:\n%s", d.view())
+	}
 	d.mustSee("Bem-vindo ao git-sync", "configurar agora")
 	for _, w := range []int{60, 90, 200} { // nada quebra nem estoura em larguras diferentes
 		d.send(tea.WindowSizeMsg{Width: w, Height: 30})
@@ -332,4 +341,59 @@ func TestInstallItemHiddenWhenInstalled(t *testing.T) {
 	if strings.Contains(d.view(), "Instalar no PATH") {
 		t.Fatalf("já instalado: a opção não deveria aparecer:\n%s", d.view())
 	}
+}
+
+// TestInstanceFormGuide: o formulário mostra como criar cada token e exige o
+// token de mirror no GitHub.
+func TestInstanceFormGuide(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	env := &app.Env{CfgPath: filepath.Join(t.TempDir(), "c.yaml"), Cfg: config.New(), Store: secrets.Memory{}}
+	d := newDriver(t, env)
+	d.key("esc")
+	d.menu("Adicionar instância")
+
+	d.key("tab")
+	d.typeText("https://git.casa.lan")
+	d.key("tab", "tab") // nome → token de acesso
+	d.mustSee("Token de acesso do Gitea/Forgejo", "https://git.casa.lan/user/settings/applications", "repository: Leitura e escrita")
+	d.key("tab")
+	d.mustSee("Token de mirror (opcional)")
+
+	// GitHub: dois tokens, e o de mirror é obrigatório
+	d.key("shift+tab", "shift+tab", "shift+tab", "shift+tab", "left") // tipo → GitHub
+	d.mustSee("‹ GitHub ›", "dois tokens")
+	d.key("tab", "ctrl+u")
+	d.typeText("https://github.com")
+	d.key("tab", "tab")
+	d.mustSee("Token de acesso do GitHub", "Administration: Read and write")
+	d.typeText("ghp_api")
+	d.key("tab")
+	d.mustSee("Token de mirror do GitHub (obrigatório)", "Workflows: Read and write", "obrigatório no GitHub")
+	d.key("ctrl+s")
+	d.mustSee("o GitHub precisa de um token de mirror")
+	if len(env.Cfg.Instances) != 0 {
+		t.Fatal("nada deveria ser salvo sem o token de mirror")
+	}
+}
+
+// TestCredChangedOffersRenew: ao trocar o token de uma instância que recebe
+// espelhos, a TUI oferece renovar a credencial deles.
+func TestCredChangedOffersRenew(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	env := &app.Env{CfgPath: filepath.Join(t.TempDir(), "c.yaml"), Cfg: config.New(), Store: secrets.Memory{}}
+	d := newDriver(t, env)
+	d.key("esc")
+	gh := config.Instance{Name: "github", Kind: config.KindGitHub, URL: "https://github.com"}
+	d.m.mirrors.links = []mirror.Link{
+		{Target: &gh, Mirror: forge.PushMirror{RemoteAddress: "https://github.com/vini/app.git"}},
+		{Target: &gh, Mirror: forge.PushMirror{RemoteAddress: "https://github.com/vini/lib.git"}},
+	}
+	d.send(credChangedMsg{"outra"})
+	if d.m.modal != nil {
+		t.Fatal("sem espelhos para a instância, nada a oferecer")
+	}
+	d.send(credChangedMsg{"github"})
+	d.mustSee("Renovar a credencial de 2 espelhos para github?", "Cancelar")
 }

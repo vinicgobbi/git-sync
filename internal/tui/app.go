@@ -192,19 +192,11 @@ func newModel(ctx context.Context, env *app.Env, version string) model {
 				desc: func() string {
 					return "Cadastra uma conta: Gitea ou Forgejo (podem ser origem e destino) ou GitHub (só destino). " +
 						"O tipo é detectado pelo endereço, e a conexão é testada antes de salvar.\n\n" +
-						"O token fica no keyring do sistema, nunca no arquivo de configuração."
+						"Toda conta usa um token de acesso, e o GitHub também um token de mirror, que fica gravado " +
+						"nos espelhos. O formulário mostra onde criar cada um e quais permissões dar.\n\n" +
+						"Os tokens ficam no keyring do sistema, nunca no arquivo de configuração."
 				},
-				cli: "git-sync instance add [flags]",
-			},
-			{
-				label: "Importar do tea/gh", view: -1,
-				run: func() tea.Cmd { return open(newOnboarding(sh, true)) },
-				desc: func() string {
-					return "Procura os logins do tea (Gitea e Forgejo, inclusive OAuth) e do gh (GitHub) nesta máquina " +
-						"e cadastra os que você marcar, usando a própria ferramenta como credencial: nenhum token " +
-						"é copiado, e logins OAuth continuam sendo renovados pelo tea."
-				},
-				cli: "git-sync instance import",
+				cli: "git-sync instance add --name NOME --url URL [--mirror-token]",
 			},
 		}},
 		{title: "Esta ferramenta", items: []item{
@@ -213,10 +205,10 @@ func newModel(ctx context.Context, env *app.Env, version string) model {
 			{label: "Diagnóstico", view: 2},
 			{
 				label: "Primeiros passos", view: -1,
-				run: func() tea.Cmd { return open(newOnboarding(sh, false)) },
+				run: func() tea.Cmd { return open(newOnboarding(sh)) },
 				desc: func() string {
-					return "Explica como o git-sync funciona e importa suas contas do tea e do gh. É o mesmo " +
-						"guia da primeira vez que você abre o git-sync."
+					return "Explica como o git-sync funciona e guia o cadastro das suas contas, com os tokens " +
+						"que cada uma precisa. É o mesmo guia da primeira vez que você abre o git-sync."
 				},
 			},
 		}},
@@ -245,7 +237,7 @@ func (m model) Init() tea.Cmd {
 	}
 	cmds = append(cmds, checkUpdate(m.sh))
 	if len(m.sh.env.Cfg.Instances) == 0 {
-		cmds = append(cmds, open(newOnboarding(m.sh, false)))
+		cmds = append(cmds, open(newOnboarding(m.sh)))
 	}
 	return tea.Batch(cmds...)
 }
@@ -327,6 +319,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case confirmMsg:
 		m.modal = newModal(msg)
 		return m, nil
+
+	case credChangedMsg:
+		if n := m.mirrors.countTo(msg.name); n > 0 {
+			return m, renew(m.sh, msg.name, n)
+		}
+		return m, nil
+
+	case renewedMsg:
+		return m, tea.Batch(renewedToast(msg), m.broadcast(reloadMsg{}))
 
 	case updateCheckedMsg:
 		m.sh.latest = &msg.r
@@ -504,7 +505,7 @@ func (m model) nextStep() string {
 	cfg := m.sh.env.Cfg
 	switch {
 	case len(cfg.Instances) == 0:
-		return `Nenhuma conta ainda: comece por "Importar do tea/gh" ou "Adicionar instância".`
+		return `Nenhuma conta ainda: comece por "Adicionar instância" (o git-sync mostra como criar o token).`
 	case len(cfg.Sources()) == 0:
 		return `Falta uma origem: cadastre o Gitea ou Forgejo dos seus repositórios em "Adicionar instância".`
 	case len(cfg.Instances) < 2:

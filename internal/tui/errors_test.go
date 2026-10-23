@@ -35,7 +35,7 @@ func TestMirrorHint(t *testing.T) {
 	if h := mirrorHint("refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope"); !strings.Contains(h, "Workflows: write") {
 		t.Errorf("dica de workflow: %q", h)
 	}
-	if h := mirrorHint("fatal: Authentication failed for 'https://github.com/x/y.git/'"); !strings.Contains(h, "token de mirror") {
+	if h := mirrorHint("fatal: Authentication failed for 'https://github.com/x/y.git/'"); !strings.Contains(h, "renove a credencial") {
 		t.Errorf("dica de autenticação: %q", h)
 	}
 }

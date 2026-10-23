@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -41,7 +40,6 @@ var (
 	ikEdit   = bind([]string{"enter", "e"}, "enter", "editar")
 	ikRemove = bind([]string{"x", "delete"}, "x", "remover")
 	ikTest   = bind([]string{"t"}, "t", "testar conexão")
-	ikImport = bind([]string{"i"}, "i", "importar do tea/gh")
 )
 
 func newInstancesView(sh *shared) *instancesView {
@@ -53,9 +51,9 @@ func (v *instancesView) Capturing() bool { return false }
 
 func (v *instancesView) Keys() []key.Binding {
 	if len(v.sh.env.Cfg.Instances) == 0 {
-		return []key.Binding{ikAdd, ikImport}
+		return []key.Binding{ikAdd}
 	}
-	return []key.Binding{ikAdd, ikEdit, ikRemove, ikTest, ikImport, kUp, kDown}
+	return []key.Binding{ikAdd, ikEdit, ikRemove, ikTest, kRenew, kUp, kDown}
 }
 
 func (v *instancesView) checkAll() tea.Cmd {
@@ -109,8 +107,10 @@ func (v *instancesView) Update(msg tea.Msg) (view, tea.Cmd) {
 			v.cursor = min(v.cursor+1, max(len(insts)-1, 0))
 		case key.Matches(msg, ikAdd):
 			return v, open(newInstanceForm(v.sh, nil))
-		case key.Matches(msg, ikImport):
-			return v, open(newOnboarding(v.sh, true))
+		case key.Matches(msg, kRenew):
+			if v.cursor < len(insts) {
+				return v, renew(v.sh, insts[v.cursor].Name, -1)
+			}
 		case key.Matches(msg, ikEdit):
 			if v.cursor < len(insts) {
 				in := insts[v.cursor]
@@ -132,19 +132,6 @@ func (v *instancesView) Update(msg tea.Msg) (view, tea.Cmd) {
 	return v, nil
 }
 
-func authLabel(in config.Instance, st app.InstanceStatus) string {
-	switch in.Auth {
-	case config.AuthTea:
-		if st.OAuth {
-			return "login do tea (OAuth)"
-		}
-		return "login do tea"
-	case config.AuthGh:
-		return "login do gh"
-	}
-	return "token no keyring"
-}
-
 func (v *instancesView) status(in config.Instance) (dot, text string) {
 	c, ok := v.checks[in.Name]
 	switch {
@@ -162,8 +149,8 @@ func (v *instancesView) View(w, h int) string {
 	insts := v.sh.env.Cfg.Instances
 	if len(insts) == 0 {
 		return emptyCard("Nenhuma instância",
-			"Cadastre as contas que o git-sync vai usar: a origem\n(Gitea ou Forgejo) e os destinos (GitHub, Codeberg…).",
-			keyHint("i", "importar do tea/gh")+"   "+keyHint("a", "adicionar manualmente"))
+			"Cadastre as contas que o git-sync vai usar: a origem\n(Gitea ou Forgejo) e os destinos (GitHub, Codeberg…),\ncada uma com um token de acesso.",
+			keyHint("a", "adicionar instância"))
 	}
 
 	var b strings.Builder
@@ -197,20 +184,22 @@ func (v *instancesView) detail(in config.Instance, w int) string {
 		"",
 		field("Endereço", in.URL),
 		field("Papel", role),
-		field("Credencial da API", authLabel(in, st)),
+		field("Token de acesso", "no keyring do sistema"),
+	}
+	if in.LegacyAuth != "" {
+		lines[len(lines)-1] = field("Token de acesso", sErr.Render("falta (usava o login do "+in.LegacyAuth+")"))
 	}
 
-	mirrorCred := "usa a credencial da API"
+	mirrorCred := "usa o token de acesso"
 	var warn string
 	switch {
 	case st.MirrorToken:
-		mirrorCred = sOK.Render("token dedicado ✔")
-	case st.OAuth:
-		mirrorCred = sWarn.Render("nenhuma")
-		warn = "Logins OAuth expiram e não servem como credencial de espelho. Para usar " + in.Name +
-			" como destino, edite a instância e informe um token de mirror."
+		mirrorCred = sOK.Render("token de mirror ✔")
 	case in.Kind == config.KindGitHub:
-		warn = "Recomendado: um fine-grained PAT dedicado com Contents e Workflows: write como token de mirror."
+		mirrorCred = sErr.Render("falta o token de mirror")
+		warn = "Sem token de mirror, " + in.Name + " não pode receber espelhos. Edite a instância (enter) e veja como criá-lo."
+	default:
+		warn = "Recomendado: um token de mirror só com escrita em repository, em vez do token de acesso."
 	}
 	lines = append(lines, field("Credencial dos espelhos", mirrorCred))
 
@@ -224,10 +213,12 @@ func (v *instancesView) detail(in config.Instance, w int) string {
 	if warn != "" {
 		lines = append(lines, "", sWarn.Render("⚠ ")+wrap(warn, w-6))
 	}
+	lines = append(lines, "", sMuted.Render(wrap("Trocou um token? Os espelhos que enviam para cá guardam o antigo: "+
+		"c renova a credencial em todos eles.", w-4)))
 	return sCard.Width(w).Render(strings.Join(lines, "\n"))
 }
 
-// diagnosticsView verifica ferramentas, keyring e configuração.
+// diagnosticsView verifica o keyring e a configuração.
 type diagnosticsView struct {
 	sh      *shared
 	spin    spinner.Model
@@ -236,13 +227,7 @@ type diagnosticsView struct {
 }
 
 type diagReport struct {
-	checks     []depCheck
 	keyringErr error
-}
-
-type depCheck struct {
-	name, version, detail, purpose string
-	found, required                bool
 }
 
 type diagDoneMsg struct{ r *diagReport }
@@ -256,7 +241,7 @@ func newDiagnosticsView(sh *shared) *diagnosticsView {
 func (v *diagnosticsView) Init() tea.Cmd   { return v.run() }
 func (v *diagnosticsView) Capturing() bool { return false }
 func (v *diagnosticsView) Keys() []key.Binding {
-	return []key.Binding{dkRun, ikImport}
+	return []key.Binding{dkRun}
 }
 
 func (v *diagnosticsView) run() tea.Cmd {
@@ -279,8 +264,6 @@ func (v *diagnosticsView) Update(msg tea.Msg) (view, tea.Cmd) {
 		switch {
 		case key.Matches(msg, dkRun):
 			return v, v.run()
-		case key.Matches(msg, ikImport):
-			return v, open(newOnboarding(v.sh, true))
 		}
 	}
 	return v, nil
@@ -293,26 +276,11 @@ func (v *diagnosticsView) View(w, h int) string {
 	cw := min(w-2, 100)
 	var b strings.Builder
 
-	b.WriteString(sSection.Render("Ferramentas") + "\n")
-	for _, c := range v.report.checks {
-		mark := sOK.Render("✔")
-		if !c.found {
-			mark = sMuted.Render("○")
-			if c.required {
-				mark = sErr.Render("✘")
-			}
-		}
-		b.WriteString(fmt.Sprintf(" %s %s %s\n", mark, padRight(sBold.Render(c.name), 6), sMuted.Render(c.version)))
-		b.WriteString("     " + sMuted.Render(c.purpose) + "\n")
-		if c.detail != "" {
-			b.WriteString("     " + truncate(c.detail, cw-6) + "\n")
-		}
-	}
-
 	b.WriteString(sSection.Render("Armazenamento") + "\n")
 	if v.report.keyringErr != nil {
 		b.WriteString(" " + sErr.Render("✘") + " Keyring do sistema indisponível: " + humanize(v.report.keyringErr).msg + "\n")
-		b.WriteString("     " + sMuted.Render(wrap("Tokens digitados não poderão ser salvos. Instâncias via tea/gh continuam funcionando.", cw-6)) + "\n")
+		b.WriteString("     " + sMuted.Render(wrap("Os tokens não poderão ser salvos, e as instâncias não conseguem se conectar. "+
+			"No Linux, instale e desbloqueie um serviço de Secret Service (GNOME Keyring, KWallet...).", cw-6)) + "\n")
 	} else {
 		b.WriteString(" " + sOK.Render("✔") + " Keyring do sistema disponível " + sMuted.Render("(tokens ficam fora dos arquivos)") + "\n")
 	}

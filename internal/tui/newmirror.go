@@ -90,7 +90,7 @@ type flowTarget struct {
 	ownerIdx int
 	loading  bool
 	err      error
-	credErr  error // a credencial de espelho não pode ser usada (ex.: OAuth)
+	credErr  error // não há credencial para gravar nos espelhos (ex.: GitHub sem token de mirror)
 }
 
 type stepState struct {
@@ -233,7 +233,7 @@ func (f *mirrorFlow) loadOwners(t *flowTarget) tea.Cmd {
 	t.loading, t.err, t.credErr = true, nil, nil
 	sh, in := f.sh, t.inst
 	return tea.Batch(f.spin.Tick, func() tea.Msg {
-		_, credErr := sh.env.MirrorPassword(sh.ctx, in)
+		_, credErr := sh.env.MirrorPassword(in)
 		fg, err := app.Connect(in, sh.env.Store)
 		if err != nil {
 			return flowOwnersMsg{name: in.Name, err: err, credErr: credErr}
@@ -733,8 +733,7 @@ func (f *mirrorFlow) viewTargets(w int) string {
 			b.WriteString("      " + sMuted.Render("→ "+t.inst.URL+"/"+t.owners[t.ownerIdx]+"/"+f.previewName()) + "\n")
 		}
 		if t.on && t.credErr != nil {
-			b.WriteString("      " + sWarn.Render("⚠ ") + wrap("Esta instância usa login OAuth, que expira e não serve como credencial de espelho. "+
-				"Edite-a em Instâncias e informe um token de mirror.", w-10) + "\n")
+			b.WriteString("      " + sWarn.Render("⚠ ") + wrap(humanize(t.credErr).msg+": "+humanize(t.credErr).hint, w-10) + "\n")
 		}
 	}
 	return b.String()
