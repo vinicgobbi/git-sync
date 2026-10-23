@@ -11,47 +11,48 @@ import (
 	"github.com/vinicgobbi/git-sync/internal/config"
 )
 
-// Paleta: cores adaptativas para terminais claros e escuros.
+// Paleta: as cores ANSI do terminal (como no deploy-tools), que seguem o
+// tema claro ou escuro escolhido pelo usuário.
 var (
-	colAccent   = lipgloss.AdaptiveColor{Light: "#5B3CC4", Dark: "#A78BFA"}
-	colText     = lipgloss.AdaptiveColor{Light: "#1F2937", Dark: "#E5E7EB"}
-	colMuted    = lipgloss.AdaptiveColor{Light: "#6B7280", Dark: "#9CA3AF"}
-	colFaint    = lipgloss.AdaptiveColor{Light: "#D1D5DB", Dark: "#3F3F46"}
-	colSelectBg = lipgloss.AdaptiveColor{Light: "#EDE9FE", Dark: "#2E2A47"}
-	colOK       = lipgloss.AdaptiveColor{Light: "#15803D", Dark: "#4ADE80"}
-	colErr      = lipgloss.AdaptiveColor{Light: "#B91C1C", Dark: "#F87171"}
-	colWarn     = lipgloss.AdaptiveColor{Light: "#A16207", Dark: "#FACC15"}
+	colAccent = lipgloss.Color("12")
+	colFaint  = lipgloss.Color("8")
+	colOK     = lipgloss.Color("10")
+	colErr    = lipgloss.Color("9")
+	colWarn   = lipgloss.Color("11")
+	colNotice = lipgloss.Color("14")
 )
 
 var (
-	sAccent  = lipgloss.NewStyle().Foreground(colAccent)
-	sBold    = lipgloss.NewStyle().Bold(true)
-	sTitle   = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
-	sMuted   = lipgloss.NewStyle().Foreground(colMuted)
-	sOK      = lipgloss.NewStyle().Foreground(colOK)
-	sErr     = lipgloss.NewStyle().Foreground(colErr)
-	sWarn    = lipgloss.NewStyle().Foreground(colWarn)
-	sKey     = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
-	sLabel   = lipgloss.NewStyle().Foreground(colMuted).Width(16)
-	sSection = lipgloss.NewStyle().Bold(true).Foreground(colText).MarginTop(1)
+	sAccent   = lipgloss.NewStyle().Foreground(colAccent)
+	sBold     = lipgloss.NewStyle().Bold(true)
+	sTitle    = lipgloss.NewStyle().Bold(true).Foreground(colAccent)
+	sSelected = sTitle
+	sMuted    = lipgloss.NewStyle().Faint(true)
+	sOK       = lipgloss.NewStyle().Foreground(colOK)
+	sErr      = lipgloss.NewStyle().Foreground(colErr)
+	sWarn     = lipgloss.NewStyle().Foreground(colWarn)
+	sNotice   = lipgloss.NewStyle().Foreground(colNotice)
+	sKey      = lipgloss.NewStyle().Foreground(colAccent).Bold(true)
+	sLabel    = lipgloss.NewStyle().Faint(true).Width(16)
+	sSection  = lipgloss.NewStyle().Bold(true).MarginTop(1)
 
 	sCard = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colFaint).Padding(0, 1)
 
-	sTabActive   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(colAccent).Padding(0, 1)
-	sTabInactive = lipgloss.NewStyle().Foreground(colMuted).Padding(0, 1)
+	// caixas do menu e do painel; a de quem tem o foco fica na cor de destaque
+	sBox       = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(colFaint).Padding(0, 1)
+	sBoxActive = sBox.BorderForeground(colAccent)
+
+	// botões de modais e formulários: o focado em vídeo reverso
+	sButton      = lipgloss.NewStyle().Padding(0, 2).Faint(true)
+	sButtonFocus = lipgloss.NewStyle().Padding(0, 2).Bold(true).Reverse(true)
 )
 
-// row destaca a linha selecionada em listas.
+// row marca a linha selecionada em listas.
 func row(s string, selected bool, width int) string {
 	if !selected {
 		return "  " + truncate(s, width-2)
 	}
-	line := sAccent.Bold(true).Render("▌ ") + truncate(s, width-2)
-	pad := width - ansi.StringWidth(line)
-	if pad > 0 {
-		line += strings.Repeat(" ", pad)
-	}
-	return lipgloss.NewStyle().Background(colSelectBg).Render(line)
+	return sSelected.Render("▸ ") + truncate(s, width-2)
 }
 
 func kindBadge(k config.Kind) string {
@@ -169,9 +170,14 @@ func overlay(bg, fg string, w, h int) string {
 	return strings.Join(bgLines, "\n")
 }
 
-// centered posiciona um bloco no meio da área.
-func centered(s string, w, h int) string {
-	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, s)
+// clip corta cada linha na largura w e completa ou corta até h linhas, para
+// o conteúdo não estourar a caixa onde vai ser desenhado.
+func clip(s string, w, h int) string {
+	lines := strings.Split(fitHeight(s, h), "\n")
+	for i, l := range lines {
+		lines[i] = truncate(l, w)
+	}
+	return strings.Join(lines, "\n")
 }
 
 // keyHint formata "tecla descrição" para textos de ajuda embutidos.

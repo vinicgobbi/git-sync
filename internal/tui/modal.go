@@ -33,17 +33,14 @@ func (m *modal) handle(k tea.KeyMsg) (done bool, cmd tea.Cmd) {
 
 func (m *modal) view(w int) string {
 	border := colAccent
-	yesStyle := lipgloss.NewStyle().Padding(0, 2).Foreground(lipgloss.Color("#FFFFFF")).Background(colAccent)
 	if m.msg.danger {
 		border = colErr
-		yesStyle = yesStyle.Background(colErr)
 	}
-	idle := lipgloss.NewStyle().Padding(0, 2).Foreground(colMuted).Background(colFaint)
-	cancel, yes := idle.Render("Cancelar"), idle.Render(m.msg.yes)
+	cancel, yes := sButton.Render("Cancelar"), sButton.Render(m.msg.yes)
 	if m.yes {
-		yes = yesStyle.Bold(true).Render(m.msg.yes)
+		yes = sButtonFocus.Foreground(border).Render(m.msg.yes)
 	} else {
-		cancel = lipgloss.NewStyle().Padding(0, 2).Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(colMuted).Render("Cancelar")
+		cancel = sButtonFocus.Render("Cancelar")
 	}
 	inner := w - 6
 	content := sBold.Render(m.msg.title) + "\n\n" + wrap(m.msg.body, inner) + "\n\n" +

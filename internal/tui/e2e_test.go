@@ -10,6 +10,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/vinicgobbi/git-sync/internal/app"
 	"github.com/vinicgobbi/git-sync/internal/config"
@@ -90,7 +91,24 @@ func (d *driver) mustSee(want ...string) {
 	}
 }
 
-func (d *driver) mirrors() *mirrorsView { return d.m.tabs[0].(*mirrorsView) }
+func (d *driver) mirrors() *mirrorsView { return d.m.mirrors }
+
+// menu volta ao menu, vai até o item e abre com enter.
+func (d *driver) menu(label string) {
+	d.t.Helper()
+	if d.m.panel {
+		d.key("esc")
+	}
+	d.key("g")
+	for range d.m.refs {
+		if d.m.item().label == label {
+			d.key("enter")
+			return
+		}
+		d.key("down")
+	}
+	d.t.Fatalf("item %q não está no menu:\n%s", label, d.view())
+}
 
 // TestE2E precisa de um Gitea e um Forgejo de teste:
 //
@@ -123,7 +141,7 @@ func TestE2E(t *testing.T) {
 	d.mustSee("Nenhum espelho ainda")
 
 	// cadastra o Forgejo pelo formulário (tipo detectado automaticamente)
-	d.key("2", "a")
+	d.menu("Adicionar instância")
 	d.mustSee("Adicionar instância", "Gitea e Forgejo podem ser origem")
 	d.key("tab")
 	d.typeText(fURL)
@@ -138,7 +156,7 @@ func TestE2E(t *testing.T) {
 	}
 
 	// novo espelho pelo assistente
-	d.key("1", "n")
+	d.menu("Novo espelho")
 	d.mustSee("● Origem", "casa")
 	d.key("enter") // origem casa
 	d.mustSee("Quais repositórios de casa?", "vini/app", "vini/lib")
@@ -174,6 +192,7 @@ func TestE2E(t *testing.T) {
 		}
 		time.Sleep(2 * time.Second)
 	}
+	d.menu("Espelhos")
 	d.key("r")
 	d.mustSee("2 em dia")
 	t.Log("\n" + d.view())
@@ -184,6 +203,9 @@ func TestE2E(t *testing.T) {
 	d.key("esc", "esc", "esc", "esc", "esc")
 	if len(d.m.flows) != 0 {
 		t.Fatalf("esc deveria voltar até o painel:\n%s", d.view())
+	}
+	if !d.m.panel {
+		d.menu("Espelhos") // um esc a mais devolve o foco ao menu
 	}
 
 	// remover pede confirmação; o botão inicial é Cancelar
@@ -210,11 +232,50 @@ func TestOnboardingFirstRun(t *testing.T) {
 	d.mustSee("Não encontramos logins")
 	d.key("esc", "esc")
 	d.mustSee("Bem-vindo ao git-sync", "configurar agora")
-	for _, w := range []int{60, 90, 200} { // nada quebra em larguras diferentes
+	for _, w := range []int{60, 90, 200} { // nada quebra nem estoura em larguras diferentes
 		d.send(tea.WindowSizeMsg{Width: w, Height: 30})
-		for _, tab := range []string{"1", "2", "3"} {
-			d.key(tab)
-			_ = d.view()
+		d.key("g")
+		for range d.m.refs {
+			for i, l := range strings.Split(d.view(), "\n") {
+				if lw := lipgloss.Width(l); lw > w {
+					t.Fatalf("largura %d, item %q: linha %d tem %d colunas:\n%s", w, d.m.item().label, i, lw, d.view())
+				}
+			}
+			d.key("down")
 		}
+	}
+}
+
+// TestMenuFocus: enter leva o foco do menu ao painel e esc devolve; um
+// item de ação mostra a descrição e o comando equivalente.
+func TestMenuFocus(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	env := &app.Env{CfgPath: filepath.Join(t.TempDir(), "c.yaml"), Cfg: config.New(), Store: secrets.Memory{}}
+	d := newDriver(t, env)
+	d.key("esc", "esc") // fecha o onboarding da primeira vez
+	d.mustSee("ESPELHOS", "▸ Espelhos", "Nenhuma conta ainda")
+
+	d.key("enter")
+	if !d.m.panel {
+		t.Fatalf("enter num item de tela deveria focar o painel:\n%s", d.view())
+	}
+	d.mustSee("● Espelhos", "esc menu")
+	d.key("esc")
+	if d.m.panel {
+		t.Fatalf("esc deveria devolver o foco ao menu")
+	}
+
+	d.key("down")
+	d.mustSee("▸ Novo espelho", "Pelo terminal:", "git-sync mirror")
+	d.key("enter") // sem instâncias: avisa em vez de abrir
+	if len(d.m.flows) != 0 {
+		t.Fatalf("novo espelho sem instâncias não deveria abrir o assistente")
+	}
+	d.mustSee("Adicionar instância")
+
+	d.menu("Adicionar instância")
+	if len(d.m.flows) != 1 {
+		t.Fatalf("Adicionar instância deveria abrir o formulário:\n%s", d.view())
 	}
 }

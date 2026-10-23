@@ -208,7 +208,7 @@ func (o *onboarding) handleKey(msg tea.KeyMsg) (view, tea.Cmd) {
 		case key.Matches(msg, okManual):
 			return o, open(newInstanceForm(o.sh, nil))
 		case msg.String() == "enter", msg.String() == "esc":
-			text := "Tudo pronto! Pressione n para criar seu primeiro espelho."
+			text := `Tudo pronto! Crie seu primeiro espelho em "Novo espelho".`
 			if len(o.sh.env.Cfg.Sources()) == 0 {
 				text = "Cadastre uma instância Gitea ou Forgejo para começar a espelhar."
 			}
@@ -237,7 +237,7 @@ func (o *onboarding) View(w, h int) string {
 	default:
 		body = o.viewDone(cw)
 	}
-	return lipgloss.PlaceHorizontal(w, lipgloss.Center, lipgloss.NewStyle().Width(cw).Render(body))
+	return lipgloss.NewStyle().Width(cw).Render(body)
 }
 
 func (o *onboarding) viewWelcome(w int) string {

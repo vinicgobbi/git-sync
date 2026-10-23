@@ -161,9 +161,9 @@ func (v *instancesView) status(in config.Instance) (dot, text string) {
 func (v *instancesView) View(w, h int) string {
 	insts := v.sh.env.Cfg.Instances
 	if len(insts) == 0 {
-		return centered(emptyCard("Nenhuma instância",
+		return emptyCard("Nenhuma instância",
 			"Cadastre as contas que o git-sync vai usar: a origem\n(Gitea ou Forgejo) e os destinos (GitHub, Codeberg…).",
-			keyHint("i", "importar do tea/gh")+"   "+keyHint("a", "adicionar manualmente")), w, h)
+			keyHint("i", "importar do tea/gh")+"   "+keyHint("a", "adicionar manualmente"))
 	}
 
 	var b strings.Builder
@@ -288,7 +288,7 @@ func (v *diagnosticsView) Update(msg tea.Msg) (view, tea.Cmd) {
 
 func (v *diagnosticsView) View(w, h int) string {
 	if v.report == nil {
-		return centered(v.spin.View()+" Verificando o ambiente…", w, h)
+		return "\n" + v.spin.View() + " Verificando o ambiente…"
 	}
 	cw := min(w-2, 100)
 	var b strings.Builder

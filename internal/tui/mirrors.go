@@ -15,7 +15,7 @@ import (
 	"github.com/vinicgobbi/git-sync/internal/mirror"
 )
 
-// mirrorsView é a aba principal: todos os push mirrors das origens.
+// mirrorsView é a tela principal: todos os push mirrors das origens.
 type mirrorsView struct {
 	sh       *shared
 	spin     spinner.Model
@@ -218,18 +218,10 @@ func (v *mirrorsView) handleKey(msg tea.KeyMsg) (view, tea.Cmd) {
 		v.cursor = max(len(vis)-1, 0)
 	case key.Matches(msg, mkFilter):
 		return v, v.filter.Focus()
-	case msg.String() == "esc" && v.filter.Value() != "":
-		v.filter.SetValue("")
 	case key.Matches(msg, kRefresh):
 		return v, v.load()
 	case key.Matches(msg, mkNew):
-		if len(cfg.Sources()) == 0 {
-			return v, notify(toastErr, "Cadastre uma instância Gitea ou Forgejo para servir de origem (aba Instâncias).")
-		}
-		if len(cfg.Instances) < 2 {
-			return v, notify(toastErr, "Cadastre também a instância de destino (aba Instâncias).")
-		}
-		return v, open(newMirrorFlow(v.sh, v.links))
+		return v, v.newMirror()
 	case key.Matches(msg, mkSync):
 		if l, ok := v.selected(); ok {
 			return v, v.sync([]mirror.Link{l})
@@ -259,6 +251,28 @@ func (v *mirrorsView) handleKey(msg tea.KeyMsg) (view, tea.Cmd) {
 	}
 	v.scroll()
 	return v, nil
+}
+
+// HandleEsc limpa o filtro aplicado antes de o esc voltar ao menu.
+func (v *mirrorsView) HandleEsc() bool {
+	if v.filter.Value() == "" {
+		return false
+	}
+	v.filter.SetValue("")
+	v.cursor, v.offset = 0, 0
+	return true
+}
+
+// newMirror abre o assistente, ou avisa o que falta cadastrar antes.
+func (v *mirrorsView) newMirror() tea.Cmd {
+	cfg := v.sh.env.Cfg
+	if len(cfg.Sources()) == 0 {
+		return notify(toastErr, `Cadastre uma instância Gitea ou Forgejo para servir de origem, em "Adicionar instância".`)
+	}
+	if len(cfg.Instances) < 2 {
+		return notify(toastErr, `Cadastre também a instância de destino, em "Adicionar instância".`)
+	}
+	return open(newMirrorFlow(v.sh, v.links))
 }
 
 func (v *mirrorsView) scroll() {
@@ -363,23 +377,23 @@ func (v *mirrorsView) View(w, h int) string {
 	cfg := v.sh.env.Cfg
 	switch {
 	case len(cfg.Instances) == 0:
-		return centered(emptyCard("Bem-vindo ao git-sync",
+		return emptyCard("Bem-vindo ao git-sync",
 			"Espelhe repositórios do seu Gitea ou Forgejo para o GitHub,\n"+
 				"Codeberg ou outra instância — usando o espelhamento nativo\n"+
 				"da origem. Vamos começar encontrando suas contas.",
-			keyHint("enter", "configurar agora")), w, h)
+			keyHint("enter", "configurar agora"))
 	case len(cfg.Sources()) == 0:
-		return centered(emptyCard("Falta uma origem",
+		return emptyCard("Falta uma origem",
 			"Só Gitea e Forgejo conseguem enviar espelhos (push mirrors).\n"+
 				"Cadastre a instância Gitea ou Forgejo onde estão seus repositórios.",
-			keyHint("enter", "adicionar instância")), w, h)
+			keyHint("enter", "adicionar instância"))
 	case !v.loaded:
-		return centered(v.spin.View()+" Procurando espelhos nas suas instâncias…", w, h)
+		return "\n" + v.spin.View() + " Procurando espelhos nas suas instâncias…"
 	case len(v.links) == 0 && len(v.warnings) == 0:
-		return centered(emptyCard("Nenhum espelho ainda",
+		return emptyCard("Nenhum espelho ainda",
 			"Escolha repositórios de "+sourceNames(v)+" e para onde enviá-los.\n"+
 				"O git-sync cria os repositórios no destino e configura tudo.",
-			keyHint("n", "criar o primeiro espelho")), w, h)
+			keyHint("n", "criar o primeiro espelho"))
 	}
 
 	header := v.summary(w)
@@ -420,12 +434,12 @@ func sourceNames(v *mirrorsView) string {
 	return strings.Join(names, ", ")
 }
 
+// emptyCard é o texto de uma tela ainda sem nada para mostrar.
 func emptyCard(title, body, action string) string {
-	return sCard.Padding(1, 3).Render(sTitle.Render(title) + "\n\n" + body + "\n\n" + action)
+	return "\n" + sBold.Render(title) + "\n\n" + body + "\n\n" + action
 }
 
-func (v *mirrorsView) summary(w int) string {
-	var ok, pend, bad int
+func (v *mirrorsView) counts() (ok, pend, bad int) {
 	for _, l := range v.links {
 		switch v.state(l) {
 		case stateErr:
@@ -436,6 +450,26 @@ func (v *mirrorsView) summary(w int) string {
 			ok++
 		}
 	}
+	return ok, pend, bad
+}
+
+// health resume os espelhos para o canto do cabeçalho.
+func (v *mirrorsView) health() string {
+	if !v.loaded || len(v.links) == 0 {
+		return ""
+	}
+	switch _, pend, bad := v.counts(); {
+	case bad > 0:
+		return sErr.Render(plural(bad, "com erro", "com erro"))
+	case pend > 0:
+		return sWarn.Render(plural(pend, "aguardando 1º envio", "aguardando 1º envio"))
+	default:
+		return sOK.Render("todos em dia ✓")
+	}
+}
+
+func (v *mirrorsView) summary(w int) string {
+	ok, pend, bad := v.counts()
 	parts := []string{sOK.Render("● ") + plural(ok, "em dia", "em dia")}
 	if bad > 0 {
 		parts = append(parts, sErr.Render("● ")+plural(bad, "com erro", "com erro"))

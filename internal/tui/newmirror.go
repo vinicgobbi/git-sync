@@ -712,7 +712,7 @@ func (f *mirrorFlow) viewTargets(w int) string {
 	b.WriteString(sBold.Render("Para onde enviar "+plural(n, "repositório", "repositórios")+"?") + "\n" +
 		sMuted.Render("Marque um ou mais destinos. O repositório é criado vazio no destino, com o mesmo nome.") + "\n\n")
 	if len(f.targets) == 0 {
-		b.WriteString(sWarn.Render("⚠ ") + "Nenhuma outra instância cadastrada. Adicione um destino na aba Instâncias.\n")
+		b.WriteString(sWarn.Render("⚠ ") + `Nenhuma outra instância cadastrada. Adicione um destino em "Adicionar instância".` + "\n")
 	}
 	for i, t := range f.targets {
 		line := checkbox(t.on) + " " + padRight(sBold.Render(t.inst.Name), 16) + padRight(kindBadge(t.inst.Kind), 10)
@@ -734,7 +734,7 @@ func (f *mirrorFlow) viewTargets(w int) string {
 		}
 		if t.on && t.credErr != nil {
 			b.WriteString("      " + sWarn.Render("⚠ ") + wrap("Esta instância usa login OAuth, que expira e não serve como credencial de espelho. "+
-				"Edite-a na aba Instâncias e informe um token de mirror.", w-10) + "\n")
+				"Edite-a em Instâncias e informe um token de mirror.", w-10) + "\n")
 		}
 	}
 	return b.String()

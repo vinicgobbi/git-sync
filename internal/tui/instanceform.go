@@ -439,9 +439,9 @@ func (f *instanceForm) View(w, h int) string {
 	for i, ff := range f.fields {
 		focused := i == f.focus
 		if ff == ffSave {
-			btn := lipgloss.NewStyle().Padding(0, 2).Foreground(colMuted).Background(colFaint).Render("Testar e salvar")
+			btn := sButton.Render("Testar e salvar")
 			if focused {
-				btn = lipgloss.NewStyle().Padding(0, 2).Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(colAccent).Render("Testar e salvar")
+				btn = sButtonFocus.Foreground(colAccent).Render("Testar e salvar")
 			}
 			b.WriteString("\n  " + strings.Repeat(" ", 18) + btn + "\n")
 			continue
