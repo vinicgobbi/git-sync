@@ -1,3 +1,9 @@
+## v2.0.1 (2026-10-23)
+
+### Fix
+
+- tokens classic no GitHub, com escopos conferidos ao salvar
+
 ## v2.0.0 (2026-10-23)
 
 ### BREAKING CHANGE
