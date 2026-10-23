@@ -1,3 +1,9 @@
+## v1.4.0 (2026-10-23)
+
+### Feat
+
+- verificar e baixar atualizações; release com binários soltos
+
 ## v1.3.0 (2026-10-23)
 
 ### Feat
