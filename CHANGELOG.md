@@ -1,3 +1,17 @@
+## v2.0.0 (2026-10-23)
+
+### BREAKING CHANGE
+
+- os logins do tea e do gh não são mais usados: saem
+`auth: tea|gh`, `--auth`, `instance import` e a importação na TUI.
+Instâncias configuradas assim ficam sem credencial até receberem um
+token de acesso. O pacote deps e a verificação de git, gh e tea também
+saem do doctor e do Diagnóstico.
+
+### Feat
+
+- autenticação só por tokens, com guia de permissões e renovação
+
 ## v1.4.0 (2026-10-23)
 
 ### Feat
