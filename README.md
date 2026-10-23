@@ -7,6 +7,9 @@ O git-sync cria o repositório vazio no destino e configura o push mirror na ori
 
 ## Instalação
 
+Baixe o binário da sua plataforma (Linux, macOS ou Windows; amd64/arm64) em
+[Releases](https://github.com/vinicgobbi/git-sync/releases), ou:
+
 ```sh
 go install github.com/vinicgobbi/git-sync/cmd/git-sync@latest
 ```
@@ -42,6 +45,19 @@ O token do destino fica gravado no servidor de origem. Prefira um token dedicado
 **Workflows: write** (sem este, pushes que alteram `.github/workflows` falham).
 
 ## Desenvolvimento
+
+### Commits e versões
+
+O projeto usa [Conventional Commits](https://www.conventionalcommits.org/pt-br/) e
+[commitizen](https://commitizen-tools.github.io/commitizen/) (`pipx install commitizen`; `cz commit` ajuda a escrever a mensagem).
+
+A cada push na `main`, a Action decide o bump pelas mensagens desde a última tag:
+`fix:` → patch, `feat:` → minor, `BREAKING CHANGE`/`feat!:` → major. Havendo bump, ela atualiza o
+`CHANGELOG.md`, cria o commit `bump: …` e a tag `vX.Y.Z`, e publica a release com os binários
+(GoReleaser). Commits `docs:`, `ci:`, `chore:`, `refactor:`, `test:` não geram release.
+Em PRs, as mensagens de commit são validadas com `cz check`.
+
+### Testes
 
 ```sh
 go test ./...

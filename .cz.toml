@@ -1,0 +1,8 @@
+[tool.commitizen]
+name = "cz_conventional_commits"
+# a versão vem das tags git (vX.Y.Z); não há arquivo de versão para manter
+version_provider = "scm"
+tag_format = "v$version"
+update_changelog_on_bump = true
+changelog_incremental = true
+major_version_zero = false

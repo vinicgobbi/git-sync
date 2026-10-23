@@ -1,0 +1,129 @@
+# Fluxo:
+#   PR            → testes + validação das mensagens de commit (Conventional Commits)
+#   push na main  → testes → commitizen decide o bump; se houver feat/fix/BREAKING,
+#                   atualiza o CHANGELOG, cria commit + tag vX.Y.Z e publica a release
+#   push de tag   → release daquela tag (ex.: a primeira, ou para refazer uma release)
+#
+# Actions fixadas por SHA; o comentário indica a versão correspondente.
+name: release
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  COMMITIZEN_VERSION: "4.19.2"
+  GORELEASER_VERSION: "v2.19.0"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  commits:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - run: pipx install "commitizen==${COMMITIZEN_VERSION}"
+      - name: Validar mensagens de commit
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: cz check --rev-range "${BASE}..${HEAD}"
+
+  bump:
+    needs: test
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      !startsWith(github.event.head_commit.message, 'bump:')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      bumped: ${{ steps.bump.outputs.bumped }}
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # commitizen precisa do histórico e das tags
+      - run: pipx install "commitizen==${COMMITIZEN_VERSION}"
+      - id: bump
+        name: cz bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          before="$(cz version --project)"
+          # não são erros: 3 = nenhum commit desde a última tag;
+          # 21 = só commits que não geram bump (docs, ci, chore…)
+          cz --no-raise 3,21 bump --yes
+          after="$(cz version --project)"
+          if [ "$before" = "$after" ]; then
+            echo "Sem bump (versão continua $before)."
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # o push com GITHUB_TOKEN não dispara outro workflow, então a release
+          # é feita no job seguinte deste mesmo run
+          git push --atomic origin "HEAD:${GITHUB_REF_NAME}" "v${after}"
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+          echo "tag=v${after}" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: [test, bump]
+    if: >-
+      always() && needs.test.result == 'success' &&
+      (startsWith(github.ref, 'refs/tags/v') || needs.bump.outputs.bumped == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || needs.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0 # goreleaser usa o histórico/tags
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Notas da release (seção do CHANGELOG.md)
+        run: |
+          awk -v tag="$TAG" '
+            $0 ~ "^## " tag " " { on = 1; next }
+            on && /^## / { exit }
+            on { print }
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "seção $TAG não encontrada no CHANGELOG.md" >&2
+            exit 1
+          fi
+          cat "$RUNNER_TEMP/notes.md"
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: ${{ env.GORELEASER_VERSION }}
+          args: release --clean --release-notes ${{ runner.temp }}/notes.md
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
