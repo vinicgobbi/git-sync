@@ -1,3 +1,9 @@
+## v1.3.0 (2026-10-23)
+
+### Feat
+
+- instalar o binário no PATH (comando install e item na TUI)
+
 ## v1.2.0 (2026-10-23)
 
 ### Feat
