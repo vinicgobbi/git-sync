@@ -1,3 +1,10 @@
+## v1.1.0 (2026-10-23)
+
+### Feat
+
+- **tui**: redesenho com foco na experiência do usuário
+- credenciais via login do tea (inclusive OAuth) e do gh
+
 ## v1.0.0 (2026-10-23)
 
 ### Feat
