@@ -279,3 +279,57 @@ func TestMenuFocus(t *testing.T) {
 		t.Fatalf("Adicionar instância deveria abrir o formulário:\n%s", d.view())
 	}
 }
+
+// TestInstallItem: "Instalar no PATH" copia o binário, põe a pasta no PATH
+// pelo arquivo do shell e some do menu.
+func TestInstallItem(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	env := &app.Env{CfgPath: filepath.Join(t.TempDir(), "c.yaml"), Cfg: config.New(), Store: secrets.Memory{}}
+	d := newDriver(t, env)
+	d.key("esc", "esc")
+
+	d.menu("Instalar no PATH")
+	d.mustSee("Instalar o git-sync?", filepath.Join(home, ".zshrc"))
+	d.key("right", "enter")
+	dst := filepath.Join(home, ".local", "bin", "git-sync")
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("binário não instalado: %v\n%s", err, d.view())
+	}
+	if rc, _ := os.ReadFile(filepath.Join(home, ".zshrc")); !strings.Contains(string(rc), `export PATH="$HOME/.local/bin:$PATH"`) {
+		t.Fatalf(".zshrc sem o PATH:\n%s", rc)
+	}
+	d.mustSee("git-sync instalado em " + dst)
+	if strings.Contains(d.view(), "Instalar no PATH") {
+		t.Fatalf("o item deveria sumir depois de instalar:\n%s", d.view())
+	}
+}
+
+// TestInstallItemHiddenWhenInstalled: com este binário já no PATH, a opção
+// nem aparece.
+func TestInstallItemHiddenWhenInstalled(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	b, err := os.ReadFile(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bin, "git-sync"), b, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("PATH", bin)
+	env := &app.Env{CfgPath: filepath.Join(t.TempDir(), "c.yaml"), Cfg: config.New(), Store: secrets.Memory{}}
+	d := newDriver(t, env)
+	d.key("esc", "esc")
+	d.mustSee("ESTA FERRAMENTA", "Diagnóstico")
+	if strings.Contains(d.view(), "Instalar no PATH") {
+		t.Fatalf("já instalado: a opção não deveria aparecer:\n%s", d.view())
+	}
+}

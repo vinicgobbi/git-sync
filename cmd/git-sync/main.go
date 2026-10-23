@@ -31,6 +31,7 @@ Comandos:
   instance import              importa logins do tea e do gh
   discover                     lista push mirrors existentes nas origens
   mirror [flags]               cria repos nos destinos e configura push mirrors
+  install [flags]              instala este binário no seu PATH (sem admin)
   version                      mostra a versão
 
 Use "git-sync <comando> -h" para ver as flags.
@@ -80,6 +81,9 @@ func run(ctx context.Context, args []string) error {
 	if *showVersion || fs.Arg(0) == "version" {
 		fmt.Println("git-sync", versionString())
 		return nil
+	}
+	if fs.Arg(0) == "install" {
+		return cmdInstall(fs.Args()[1:])
 	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {

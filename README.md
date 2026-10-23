@@ -8,7 +8,20 @@ O git-sync cria o repositório vazio no destino e configura o push mirror na ori
 ## Instalação
 
 Baixe o binário da sua plataforma (Linux, macOS ou Windows; amd64/arm64) em
-[Releases](https://github.com/vinicgobbi/git-sync/releases), ou:
+[Releases](https://github.com/vinicgobbi/git-sync/releases) e instale no seu PATH, sem admin:
+
+```sh
+./git-sync install                  # copia para ~/.local/bin/git-sync
+git-sync.exe install                # Windows: %LOCALAPPDATA%\Programs\git-sync
+./git-sync install --dir /usr/local/bin   # pasta própria (pode exigir sudo)
+```
+
+Se a pasta não estiver no PATH, o `install` oferece adicionar a linha no `~/.zshrc`, `~/.bashrc` ou
+`config.fish` (conforme o seu shell) ou, no Windows, ao PATH do usuário. Se já houver outro `git-sync`
+no PATH, ele é substituído por esta versão. A mesma opção aparece na interface ("Instalar no PATH")
+enquanto o binário aberto não for o instalado.
+
+Ou, com Go:
 
 ```sh
 go install github.com/vinicgobbi/git-sync/cmd/git-sync@latest
@@ -19,13 +32,18 @@ go install github.com/vinicgobbi/git-sync/cmd/git-sync@latest
 Sem argumentos, `git-sync` abre a interface (TUI). Na primeira vez, um guia explica o conceito e
 encontra seus logins do `tea` e do `gh`.
 
-- **1 Espelhos**: todos os push mirrors das origens (inclusive os criados fora da ferramenta), com
+As ações ficam num menu à esquerda (Espelhos, Instâncias e Esta ferramenta). O painel à direita mostra
+a tela do item selecionado ou, numa ação, o que ela faz e o comando equivalente. Sob o título, uma linha
+mostra **o próximo passo** (cadastrar a origem, o destino, criar o primeiro espelho, ver os que falharam...).
+`↑↓` navega, `enter` abre (ou passa o foco para a tela), `esc` volta ao menu e `q` sai.
+
+- **Espelhos**: todos os push mirrors das origens (inclusive os criados fora da ferramenta), com
   status, último envio e dicas para cada erro. `n` cria um espelho, `s` sincroniza, `o` abre no navegador,
   `x` remove, `/` filtra.
-- **2 Instâncias**: contas cadastradas, testadas na hora; `a` adiciona, `enter` edita, `i` importa do tea/gh.
-- **3 Diagnóstico**: git, gh, tea e keyring.
 - **Novo espelho**: assistente em etapas (origem → repositórios → destinos → opções → revisão → execução).
   Nada é alterado antes da revisão, e rodar de novo não duplica nada.
+- **Instâncias**: contas cadastradas, testadas na hora; `a` adiciona, `enter` edita, `i` importa do tea/gh.
+- **Diagnóstico**: git, gh, tea e keyring.
 
 `?` mostra todos os atalhos da tela atual.
 
@@ -39,6 +57,7 @@ git-sync instance add --name casa --url https://git.casa.lan --auth tea   # usa 
 git-sync discover               # lista push mirrors existentes
 git-sync mirror --from casa --repo eu/app --to github --to codeberg:minha-org --dry-run
 git-sync mirror --from casa --all --owner eu --to github
+git-sync install [--dir pasta] [--add-to-path | --no-path]
 ```
 
 A configuração fica em `~/.config/git-sync/config.yaml`.

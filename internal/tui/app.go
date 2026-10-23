@@ -24,6 +24,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/vinicgobbi/git-sync/internal/app"
+	"github.com/vinicgobbi/git-sync/internal/install"
 )
 
 // view é uma tela do painel ou um fluxo.
@@ -50,9 +51,11 @@ type escHandler interface {
 }
 
 type shared struct {
-	ctx     context.Context
-	env     *app.Env
-	version string
+	ctx       context.Context
+	env       *app.Env
+	version   string
+	installer *install.Installer // nil se não deu para saber onde estamos
+	install   install.Status
 }
 
 type (
@@ -111,6 +114,9 @@ type item struct {
 	desc func() string
 	cli  string // o comando equivalente, mostrado sob a descrição
 	run  func() tea.Cmd
+	// hidden tira o item do menu enquanto devolver true (ex.: instalar,
+	// quando já está instalado).
+	hidden func() bool
 }
 
 type section struct {
@@ -144,6 +150,9 @@ func Run(ctx context.Context, env *app.Env, version string) error {
 
 func newModel(ctx context.Context, env *app.Env, version string) model {
 	sh := &shared{ctx: ctx, env: env, version: version}
+	if in, err := install.New(); err == nil {
+		sh.installer, sh.install = in, in.Status()
+	}
 	h := help.New()
 	h.ShortSeparator = " · "
 	h.Styles.ShortKey = sMuted
@@ -196,6 +205,7 @@ func newModel(ctx context.Context, env *app.Env, version string) model {
 			},
 		}},
 		{title: "Esta ferramenta", items: []item{
+			installItem(sh),
 			{label: "Diagnóstico", view: 2},
 			{
 				label: "Primeiros passos", view: -1,
@@ -207,12 +217,21 @@ func newModel(ctx context.Context, env *app.Env, version string) model {
 			},
 		}},
 	}
+	m.rebuildRefs()
+	return m
+}
+
+// rebuildRefs refaz a lista de itens visíveis do menu.
+func (m *model) rebuildRefs() {
+	m.refs = nil
 	for si, s := range m.sections {
-		for ii := range s.items {
-			m.refs = append(m.refs, [2]int{si, ii})
+		for ii, it := range s.items {
+			if it.hidden == nil || !it.hidden() {
+				m.refs = append(m.refs, [2]int{si, ii})
+			}
 		}
 	}
-	return m
+	m.cursor = min(m.cursor, len(m.refs)-1)
 }
 
 func (m model) Init() tea.Cmd {
@@ -303,6 +322,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case confirmMsg:
 		m.modal = newModal(msg)
 		return m, nil
+
+	case installedMsg:
+		if msg.err != nil {
+			return m, notifyErr(msg.err)
+		}
+		m.sh.install.Installed = true
+		m.rebuildRefs()
+		return m, notify(toastOK, msg.text)
 	}
 	return m, m.broadcast(msg)
 }
@@ -494,23 +521,22 @@ func (m model) body() string {
 
 func (m model) sidebar() string {
 	var b strings.Builder
-	i := 0
 	active := m.panel || len(m.flows) > 0
-	for si, s := range m.sections {
-		if si > 0 {
-			b.WriteString("\n")
-		}
-		b.WriteString(sMuted.Render(strings.ToUpper(s.title)) + "\n")
-		for _, it := range s.items {
-			switch {
-			case i == m.cursor && !active:
-				b.WriteString(sSelected.Render("▸ "+it.label) + "\n")
-			case i == m.cursor:
-				b.WriteString(sSelected.Render("● "+it.label) + "\n")
-			default:
-				b.WriteString("  " + it.label + "\n")
+	for i, r := range m.refs {
+		if i == 0 || r[0] != m.refs[i-1][0] {
+			if i > 0 {
+				b.WriteString("\n")
 			}
-			i++
+			b.WriteString(sMuted.Render(strings.ToUpper(m.sections[r[0]].title)) + "\n")
+		}
+		it := m.sections[r[0]].items[r[1]]
+		switch {
+		case i == m.cursor && !active:
+			b.WriteString(sSelected.Render("▸ "+it.label) + "\n")
+		case i == m.cursor:
+			b.WriteString(sSelected.Render("● "+it.label) + "\n")
+		default:
+			b.WriteString("  " + it.label + "\n")
 		}
 	}
 	return strings.TrimRight(b.String(), "\n")
