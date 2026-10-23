@@ -25,6 +25,7 @@ import (
 
 	"github.com/vinicgobbi/git-sync/internal/app"
 	"github.com/vinicgobbi/git-sync/internal/install"
+	"github.com/vinicgobbi/git-sync/internal/update"
 )
 
 // view é uma tela do painel ou um fluxo.
@@ -56,6 +57,8 @@ type shared struct {
 	version   string
 	installer *install.Installer // nil se não deu para saber onde estamos
 	install   install.Status
+	updates   update.Client
+	latest    *update.Release // última release, quando já consultada
 }
 
 type (
@@ -206,6 +209,7 @@ func newModel(ctx context.Context, env *app.Env, version string) model {
 		}},
 		{title: "Esta ferramenta", items: []item{
 			installItem(sh),
+			updateItem(sh),
 			{label: "Diagnóstico", view: 2},
 			{
 				label: "Primeiros passos", view: -1,
@@ -235,10 +239,11 @@ func (m *model) rebuildRefs() {
 }
 
 func (m model) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(m.views)+1)
+	cmds := make([]tea.Cmd, 0, len(m.views)+2)
 	for _, v := range m.views {
 		cmds = append(cmds, v.Init())
 	}
+	cmds = append(cmds, checkUpdate(m.sh))
 	if len(m.sh.env.Cfg.Instances) == 0 {
 		cmds = append(cmds, open(newOnboarding(m.sh, false)))
 	}
@@ -321,6 +326,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case confirmMsg:
 		m.modal = newModal(msg)
+		return m, nil
+
+	case updateCheckedMsg:
+		m.sh.latest = &msg.r
 		return m, nil
 
 	case installedMsg:
@@ -467,6 +476,9 @@ func (m model) header() string {
 	left := sTitle.Render("git-sync v" + m.sh.version)
 	if sub := m.subtitle(); sub != "" {
 		left += sMuted.Render("  ·  " + sub)
+	}
+	if v := m.sh.updateAvailable(); v != "" {
+		left += sMuted.Render("  ·  ") + sNotice.Render(v+" disponível")
 	}
 	right := m.mirrors.health()
 	gap := max(1, m.width-lipgloss.Width(left)-lipgloss.Width(right)-2)

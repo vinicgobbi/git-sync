@@ -16,16 +16,14 @@ builds:
     goarch: [amd64, arm64]
     mod_timestamp: "{{ .CommitTimestamp }}"
 
+# binários soltos, sem compactar (git-sync_linux_amd64, git-sync_windows_amd64.exe…).
+# O nome não leva a versão: assim o link .../releases/latest/download/<nome>
+# não muda, e o `git-sync update` sabe qual arquivo baixar (update.AssetName).
 archives:
-  - name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
-    formats: [tar.gz]
-    format_overrides:
-      - goos: windows
-        formats: [zip]
-    files:
-      - README.md
-      - CHANGELOG.md
+  - formats: [binary]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
 
+# o `git-sync update` confere o download por este arquivo
 checksum:
   name_template: checksums.txt
 

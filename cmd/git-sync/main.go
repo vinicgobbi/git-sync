@@ -32,6 +32,7 @@ Comandos:
   discover                     lista push mirrors existentes nas origens
   mirror [flags]               cria repos nos destinos e configura push mirrors
   install [flags]              instala este binário no seu PATH (sem admin)
+  update [--check]             baixa e instala a versão mais nova
   version                      mostra a versão
 
 Use "git-sync <comando> -h" para ver as flags.
@@ -82,8 +83,11 @@ func run(ctx context.Context, args []string) error {
 		fmt.Println("git-sync", versionString())
 		return nil
 	}
-	if fs.Arg(0) == "install" {
+	switch fs.Arg(0) {
+	case "install":
 		return cmdInstall(fs.Args()[1:])
+	case "update":
+		return cmdUpdate(ctx, fs.Args()[1:])
 	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {

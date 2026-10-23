@@ -165,3 +165,19 @@ func TestShellRCAndIdempotentAppend(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateTarget(t *testing.T) {
+	in := newTestInstaller(t, "linux", "/bin/zsh", "")
+	if got := in.UpdateTarget(); got != in.Self {
+		t.Fatalf("sem git-sync no PATH, o alvo é este binário: %s", got)
+	}
+	bin, real := t.TempDir(), t.TempDir()
+	_ = os.WriteFile(filepath.Join(real, "git-sync"), []byte("BIN v0"), 0o755)
+	if err := os.Symlink(filepath.Join(real, "git-sync"), filepath.Join(bin, "git-sync")); err != nil {
+		t.Skip("sem symlink:", err)
+	}
+	in.PathEnv = bin
+	if got, want := in.UpdateTarget(), cleanReal(filepath.Join(real, "git-sync")); got != want {
+		t.Fatalf("o alvo deveria ser o arquivo apontado pelo link: %s, quero %s", got, want)
+	}
+}

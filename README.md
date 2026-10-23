@@ -7,13 +7,16 @@ O git-sync cria o repositório vazio no destino e configura o push mirror na ori
 
 ## Instalação
 
-Baixe o binário da sua plataforma (Linux, macOS ou Windows; amd64/arm64) em
-[Releases](https://github.com/vinicgobbi/git-sync/releases) e instale no seu PATH, sem admin:
+Baixe o binário da sua plataforma em [Releases](https://github.com/vinicgobbi/git-sync/releases)
+(`git-sync_linux_amd64`, `git-sync_darwin_arm64`, `git-sync_windows_amd64.exe`…; o
+`checksums.txt` tem o SHA-256 de cada um) e instale no seu PATH, sem admin:
 
 ```sh
-./git-sync install                  # copia para ~/.local/bin/git-sync
-git-sync.exe install                # Windows: %LOCALAPPDATA%\Programs\git-sync
+curl -fLo git-sync https://github.com/vinicgobbi/git-sync/releases/latest/download/git-sync_linux_amd64
+chmod +x git-sync
+./git-sync install                        # copia para ~/.local/bin/git-sync
 ./git-sync install --dir /usr/local/bin   # pasta própria (pode exigir sudo)
+git-sync_windows_amd64.exe install        # Windows: %LOCALAPPDATA%\Programs\git-sync
 ```
 
 Se a pasta não estiver no PATH, o `install` oferece adicionar a linha no `~/.zshrc`, `~/.bashrc` ou
@@ -26,6 +29,15 @@ Ou, com Go:
 ```sh
 go install github.com/vinicgobbi/git-sync/cmd/git-sync@latest
 ```
+
+### Atualização
+
+`git-sync update` mostra o que mudou desde a sua versão (o changelog de cada release), baixa a última
+release do seu sistema, confere o SHA-256 publicado no `checksums.txt` e substitui o `git-sync` do PATH
+(ou o próprio binário, se não houver um no PATH). `git-sync update --check` só verifica. Na interface,
+o mesmo fica em "Verificar atualizações". Ao abrir, a interface consulta a última versão em segundo
+plano e avisa no cabeçalho quando há uma nova; para desligar a consulta, defina
+`GIT_SYNC_NO_UPDATE_CHECK=1`. Builds de desenvolvimento (`dev`) não se atualizam.
 
 ## Uso
 
@@ -58,6 +70,7 @@ git-sync discover               # lista push mirrors existentes
 git-sync mirror --from casa --repo eu/app --to github --to codeberg:minha-org --dry-run
 git-sync mirror --from casa --all --owner eu --to github
 git-sync install [--dir pasta] [--add-to-path | --no-path]
+git-sync update [--check]
 ```
 
 A configuração fica em `~/.config/git-sync/config.yaml`.

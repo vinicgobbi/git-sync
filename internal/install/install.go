@@ -162,22 +162,43 @@ func (in *Installer) Copy(dir string) (dst string, already bool, err error) {
 		_ = os.Remove(tmp)
 		return "", false, err
 	}
+	if err := in.Replace(tmp, dst); err != nil {
+		_ = os.Remove(tmp)
+		return "", false, err
+	}
+	return dst, false, nil
+}
+
+// Replace move src (na mesma pasta de dst) por cima de dst. No Windows um
+// .exe em execução não pode ser sobrescrito, então dst vai antes para o
+// lado, como dst.old.
+func (in *Installer) Replace(src, dst string) error {
 	if in.GOOS == "windows" {
 		old := dst + ".old"
 		_ = os.Remove(old)
 		if _, err := os.Stat(dst); err == nil {
 			if err := os.Rename(dst, old); err != nil {
-				return "", false, err
+				return err
 			}
 		}
 	}
-	if err := os.Rename(tmp, dst); err != nil {
-		return "", false, err
+	if err := os.Rename(src, dst); err != nil {
+		return err
 	}
 	if in.GOOS == "darwin" {
 		clearQuarantine(dst)
 	}
-	return dst, false, nil
+	return nil
+}
+
+// UpdateTarget é o binário que uma atualização substitui: o git-sync que o
+// PATH encontra (o arquivo de verdade, se for um link) ou, sem nenhum no
+// PATH, este mesmo.
+func (in *Installer) UpdateTarget() string {
+	if p := in.lookPath(); p != "" {
+		return cleanReal(p)
+	}
+	return in.Self
 }
 
 func cleanReal(p string) string {
