@@ -16,14 +16,18 @@ go install github.com/vinicgobbi/git-sync/cmd/git-sync@latest
 
 ## Uso
 
-Sem argumentos, `git-sync` abre a interface (TUI):
+Sem argumentos, `git-sync` abre a interface (TUI). Na primeira vez, um guia explica o conceito e
+encontra seus logins do `tea` e do `gh`.
 
-- **Painel**: lista os push mirrors de todas as origens (inclusive os criados fora da ferramenta),
-  com último sync e erros; `s` sincroniza agora, `x` remove o mirror.
-- **Doctor** (`d`): verifica git/gh/tea e importa logins do tea e do gh (`m`).
-- **Instâncias** (`i`): cadastra, edita ou remove instâncias e tokens.
-- **Novo espelho** (`n`): escolhe repositórios (com filtro e seleção múltipla), destinos e opções,
-  revisa o plano e executa. Rodar de novo não duplica nada.
+- **1 Espelhos**: todos os push mirrors das origens (inclusive os criados fora da ferramenta), com
+  status, último envio e dicas para cada erro. `n` cria um espelho, `s` sincroniza, `o` abre no navegador,
+  `x` remove, `/` filtra.
+- **2 Instâncias**: contas cadastradas, testadas na hora; `a` adiciona, `enter` edita, `i` importa do tea/gh.
+- **3 Diagnóstico**: git, gh, tea e keyring.
+- **Novo espelho**: assistente em etapas (origem → repositórios → destinos → opções → revisão → execução).
+  Nada é alterado antes da revisão, e rodar de novo não duplica nada.
+
+`?` mostra todos os atalhos da tela atual.
 
 A mesma funcionalidade existe como CLI:
 
@@ -31,18 +35,32 @@ A mesma funcionalidade existe como CLI:
 git-sync doctor                 # verifica git, gh, tea, logins e tokens
 git-sync instance import        # importa logins do tea e do gh
 git-sync instance add --name codeberg --url https://codeberg.org [--mirror-token]
+git-sync instance add --name casa --url https://git.casa.lan --auth tea   # usa o login do tea
 git-sync discover               # lista push mirrors existentes
 git-sync mirror --from casa --repo eu/app --to github --to codeberg:minha-org --dry-run
 git-sync mirror --from casa --all --owner eu --to github
 ```
 
-Os tokens ficam no keyring do sistema e a configuração em `~/.config/git-sync/config.yaml`.
+A configuração fica em `~/.config/git-sync/config.yaml`.
+
+### Credenciais
+
+Cada instância obtém seu token de uma destas formas:
+
+- **Login do tea** (`auth: tea`): o token é pedido ao `tea login helper` a cada uso, inclusive para
+  logins **OAuth** (o tea os renova sozinho). Nada é copiado.
+- **Login do gh** (`auth: gh`): o mesmo, via `gh auth token`.
+- **Token de acesso**: digitado no git-sync e guardado no keyring do sistema.
 
 ### Tokens de mirror
 
 O token do destino fica gravado no servidor de origem. Prefira um token dedicado
 (`--mirror-token`). No GitHub, use um fine-grained PAT com **Contents: write** e
 **Workflows: write** (sem este, pushes que alteram `.github/workflows` falham).
+
+Logins OAuth expiram em poucas horas, então não servem como credencial de espelho: para usar uma
+instância com login OAuth como **destino**, cadastre um token de mirror nela. Como **origem**, o
+OAuth funciona sem nada extra.
 
 ## Desenvolvimento
 

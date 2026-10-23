@@ -44,8 +44,12 @@ func versionString() string {
 		return version
 	}
 	// go install …@vX.Y.Z grava a versão do módulo no binário
-	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
-		return strings.TrimPrefix(bi.Main.Version, "v")
+	// (builds locais geram pseudo-versões como v1.0.1-0.2026…+dirty: mostra "dev")
+	if bi, ok := debug.ReadBuildInfo(); ok {
+		v := bi.Main.Version
+		if v != "" && v != "(devel)" && !strings.Contains(v, "-0.") && !strings.Contains(v, "+dirty") {
+			return strings.TrimPrefix(v, "v")
+		}
 	}
 	return "dev"
 }
@@ -84,12 +88,12 @@ func run(ctx context.Context, args []string) error {
 	e := &app.Env{CfgPath: *cfgPath, Cfg: cfg, Store: secrets.Keyring{}}
 
 	if fs.NArg() == 0 {
-		return tui.Run(ctx, e)
+		return tui.Run(ctx, e, versionString())
 	}
 	cmd, rest := fs.Arg(0), fs.Args()[1:]
 	switch cmd {
 	case "tui":
-		return tui.Run(ctx, e)
+		return tui.Run(ctx, e, versionString())
 	case "doctor":
 		return cmdDoctor(ctx, e)
 	case "instance":
