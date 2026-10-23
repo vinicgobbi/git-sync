@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
+	"strings"
 
 	"github.com/vinicgobbi/git-sync/internal/app"
 	"github.com/vinicgobbi/git-sync/internal/config"
@@ -29,9 +31,24 @@ Comandos:
   instance import              importa logins do tea e do gh
   discover                     lista push mirrors existentes nas origens
   mirror [flags]               cria repos nos destinos e configura push mirrors
+  version                      mostra a versão
 
 Use "git-sync <comando> -h" para ver as flags.
 `
+
+// version é preenchida no build de release (-ldflags "-X main.version=...").
+var version = ""
+
+func versionString() string {
+	if version != "" {
+		return version
+	}
+	// go install …@vX.Y.Z grava a versão do módulo no binário
+	if bi, ok := debug.ReadBuildInfo(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return strings.TrimPrefix(bi.Main.Version, "v")
+	}
+	return "dev"
+}
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -52,8 +69,13 @@ func run(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("git-sync", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	cfgPath := fs.String("config", defPath, "arquivo de configuração")
+	showVersion := fs.Bool("version", false, "mostra a versão")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *showVersion || fs.Arg(0) == "version" {
+		fmt.Println("git-sync", versionString())
+		return nil
 	}
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
