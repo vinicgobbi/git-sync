@@ -3,6 +3,7 @@
 #   push na main  → testes → commitizen decide o bump; se houver feat/fix/BREAKING,
 #                   atualiza o CHANGELOG, cria commit + tag vX.Y.Z e publica a release
 #   push de tag   → release daquela tag (ex.: a primeira, ou para refazer uma release)
+#   após a release → remove os artefatos do run; só ficam os arquivos da release
 #
 # Actions fixadas por SHA; o comentário indica a versão correspondente.
 name: release
@@ -34,6 +35,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false # nada fica armazenado nas Actions além da release
       - run: go vet ./...
       - run: go test -race ./...
 
@@ -108,6 +110,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          cache: false # nada fica armazenado nas Actions além da release
       - name: Notas da release (seção do CHANGELOG.md)
         run: |
           awk -v tag="$TAG" '
@@ -127,3 +130,23 @@ jobs:
           args: release --clean --release-notes ${{ runner.temp }}/notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  cleanup:
+    needs: release
+    if: always() && needs.release.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Remover artefatos do run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          ids="$(gh api --paginate "repos/${REPO}/actions/runs/${RUN_ID}/artifacts" --jq '.artifacts[].id')"
+          for id in $ids; do
+            gh api -X DELETE "repos/${REPO}/actions/artifacts/${id}"
+            echo "artefato ${id} removido"
+          done
+          echo "total removido: $(echo "$ids" | grep -c . || true)"
